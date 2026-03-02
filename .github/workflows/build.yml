@@ -41,7 +41,7 @@ jobs:
 
       - name: Decode Keystore
         run: |
-          echo "${{ secrets.SIGNING_KEYSTORE }}" | base64 -d > ${{ runner.temp }}/release.jks
+          printf '%s' "${{ secrets.SIGNING_KEYSTORE }}" | base64 -d > ${{ runner.temp }}/release.jks
 
       - name: Build Release APK
         env:
