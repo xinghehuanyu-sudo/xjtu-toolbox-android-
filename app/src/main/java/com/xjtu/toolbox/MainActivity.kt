@@ -26,6 +26,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -53,7 +54,15 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.NavigationBar
 import top.yukonga.miuix.kmp.basic.NavigationBarItem
+import top.yukonga.miuix.kmp.basic.NavigationDisplayMode
+import top.yukonga.miuix.kmp.basic.FloatingNavigationBar
+import top.yukonga.miuix.kmp.basic.FloatingNavigationBarItem
 import top.yukonga.miuix.kmp.basic.Scaffold
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.rememberHazeState
+import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
+import dev.chrisbanes.haze.materials.HazeMaterials
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -151,13 +160,16 @@ object Routes {
     const val LIBRARY = "library"
     const val CAMPUS_CARD = "campus_card"
     const val SCORE_REPORT = "score_report"
-    const val CURRICULUM = "curriculum"
     const val PAYMENT_CODE = "payment_code"
     const val TRANSCRIPT = "transcript"
+    const val VENUE = "venue"
+    const val CLASS_REPLAY = "class_replay"
+    const val VIDEO_PLAYER = "video_player/{activityId}"
     const val BROWSER = "browser?url={url}"
 
     fun login(type: LoginType, target: String) = "login/${type.name}/$target"
     fun browser(url: String = "") = "browser?url=${java.net.URLEncoder.encode(url, "UTF-8")}"
+    fun videoPlayer(activityId: Int) = "video_player/$activityId"
 }
 
 // ── 底部导航项 ────────────────────────────
@@ -184,6 +196,8 @@ class AppLoginState {
     var libraryLogin by mutableStateOf<LibraryLogin?>(null)
     var campusCardLogin by mutableStateOf<CampusCardLogin?>(null)
     var dzpzLogin by mutableStateOf<com.xjtu.toolbox.auth.DzpzLogin?>(null)
+    var venueLogin by mutableStateOf<com.xjtu.toolbox.auth.VenueLogin?>(null)
+    var classLogin by mutableStateOf<com.xjtu.toolbox.classreplay.ClassLogin?>(null)
 
     // 持久化 CookieJar（由外部传入，整个 App 共享一个实例）
     var persistentCookieJar: com.xjtu.toolbox.util.PersistentCookieJar? = null
@@ -241,7 +255,7 @@ class AppLoginState {
 
     val loginCount: Int
         get() = listOfNotNull(
-            attendanceLogin, jwxtLogin, jwappLogin, ywtbLogin, libraryLogin, campusCardLogin, dzpzLogin
+            attendanceLogin, jwxtLogin, jwappLogin, ywtbLogin, libraryLogin, campusCardLogin, dzpzLogin, venueLogin, classLogin
         ).size
 
     /** 是否为需要校内网络（WebVPN）的服务 */
@@ -304,6 +318,8 @@ class AppLoginState {
             LoginType.LIBRARY -> libraryLogin
             LoginType.CAMPUS_CARD -> campusCardLogin
             LoginType.DZPZ -> dzpzLogin
+            LoginType.VENUE -> venueLogin
+            LoginType.CLASS -> classLogin
         } ?: return null
 
         // Token-based 系统：仅检查有效性，不做任何网络请求
@@ -346,6 +362,8 @@ class AppLoginState {
             is LibraryLogin -> libraryLogin = login
             is CampusCardLogin -> campusCardLogin = login
             is com.xjtu.toolbox.auth.DzpzLogin -> dzpzLogin = login
+            is com.xjtu.toolbox.auth.VenueLogin -> venueLogin = login
+            is com.xjtu.toolbox.classreplay.ClassLogin -> classLogin = login
         }
         // [F1] 立即持久化关键状态（防止进程被杀后丢失）
         credentialStoreRef?.let { store ->
@@ -466,6 +484,8 @@ class AppLoginState {
             LoginType.ATTENDANCE -> attendanceLogin
             LoginType.JWXT -> jwxtLogin
             LoginType.DZPZ -> dzpzLogin
+            LoginType.VENUE -> venueLogin
+            LoginType.CLASS -> classLogin
             else -> null
         }
         if (existingLogin != null) {
@@ -477,6 +497,8 @@ class AppLoginState {
                         is AttendanceLogin -> existingLogin.reAuthenticate()
                         is JwxtLogin -> existingLogin.reAuthenticate()
                         is com.xjtu.toolbox.auth.DzpzLogin -> existingLogin.reAuthenticate()
+                        is com.xjtu.toolbox.auth.VenueLogin -> existingLogin.reAuthenticate()
+                        is com.xjtu.toolbox.classreplay.ClassLogin -> existingLogin.reAuthenticate()
                         else -> false
                     }
                 }
@@ -496,6 +518,8 @@ class AppLoginState {
                 LoginType.ATTENDANCE -> attendanceLogin = null
                 LoginType.JWXT -> jwxtLogin = null
                 LoginType.DZPZ -> dzpzLogin = null
+                LoginType.VENUE -> venueLogin = null
+                LoginType.CLASS -> classLogin = null
                 else -> {}
             }
         }
@@ -1156,11 +1180,35 @@ fun AppNavigation(onReady: () -> Unit = {}) {
         composable(Routes.SCORE_REPORT) {
             loginState.jwxtLogin?.let { ScoreReportScreen(login = it, studentId = loginState.activeUsername, onBack = { navController.popBackStack() }) } ?: LaunchedEffect(Unit) { navController.popBackStack() }
         }
-        composable(Routes.CURRICULUM) {
-            loginState.jwxtLogin?.let { com.xjtu.toolbox.jwapp.CurriculumScreen(jwxtLogin = it, jwappLogin = loginState.jwappLogin, studentId = loginState.activeUsername, onBack = { navController.popBackStack() }) } ?: LaunchedEffect(Unit) { navController.popBackStack() }
-        }
         composable(Routes.TRANSCRIPT) {
             loginState.dzpzLogin?.let { com.xjtu.toolbox.dzpz.TranscriptScreen(login = it, onBack = { navController.popBackStack() }) } ?: LaunchedEffect(Unit) { navController.popBackStack() }
+        }
+        composable(Routes.VENUE) {
+            loginState.venueLogin?.let { com.xjtu.toolbox.venue.VenueScreen(login = it, onBack = { navController.popBackStack() }) } ?: LaunchedEffect(Unit) { navController.popBackStack() }
+        }
+        composable(Routes.CLASS_REPLAY) {
+            loginState.classLogin?.let { classLogin ->
+                com.xjtu.toolbox.classreplay.ClassScreen(
+                    login = classLogin,
+                    onBack = { navController.popBackStack() },
+                    onPlayReplay = { login, activityId ->
+                        navController.navigate(Routes.videoPlayer(activityId))
+                    }
+                )
+            } ?: LaunchedEffect(Unit) { navController.popBackStack() }
+        }
+        composable(
+            Routes.VIDEO_PLAYER,
+            arguments = listOf(navArgument("activityId") { type = NavType.IntType })
+        ) { backStackEntry ->
+            val activityId = backStackEntry.arguments?.getInt("activityId") ?: 0
+            loginState.classLogin?.let { classLogin ->
+                com.xjtu.toolbox.classreplay.VideoPlayerScreen(
+                    login = classLogin,
+                    activityId = activityId,
+                    onBack = { navController.popBackStack() }
+                )
+            } ?: LaunchedEffect(Unit) { navController.popBackStack() }
         }
         composable(
             Routes.BROWSER,
@@ -1292,6 +1340,11 @@ private fun MainScreen(navController: NavHostController, loginState: AppLoginSta
     val toolsScrollBehavior = MiuixScrollBehavior(rememberTopAppBarState())
     val profileScrollBehavior = MiuixScrollBehavior(rememberTopAppBarState())
 
+    // ── Haze 高斯模糊状态 ──
+    val hazeState = rememberHazeState()
+    @OptIn(ExperimentalHazeMaterialsApi::class)
+    val hazeStyle = HazeMaterials.regular(MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+
     // HOME 大标题
     val homeGreeting = if (loginState.isLoggedIn) {
         val name = loginState.nsaProfile?.name ?: loginState.ywtbUserInfo?.userName ?: loginState.cachedNickname
@@ -1322,10 +1375,16 @@ private fun MainScreen(navController: NavHostController, loginState: AppLoginSta
                 }
             )
         },
-        bottomBar = {
-            NavigationBar {
+        bottomBar = {},
+        floatingToolbar = {
+            @OptIn(ExperimentalHazeMaterialsApi::class)
+            FloatingNavigationBar(
+                color = androidx.compose.ui.graphics.Color.Transparent,
+                modifier = Modifier.hazeEffect(state = hazeState, style = hazeStyle),
+                mode = NavigationDisplayMode.IconOnly
+            ) {
                 BottomTab.entries.forEach { tab ->
-                    NavigationBarItem(
+                    FloatingNavigationBarItem(
                         selected = selectedTab == tab,
                         onClick = { selectedTabOrdinal = tab.ordinal },
                         icon = if (selectedTab == tab) tab.selectedIcon else tab.unselectedIcon,
@@ -1335,7 +1394,7 @@ private fun MainScreen(navController: NavHostController, loginState: AppLoginSta
             }
         }
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
+        Box(Modifier.fillMaxSize().padding(padding).hazeSource(state = hazeState)) {
             // 需要联网的无登录路由（空闲教室、通知公告等纯网络功能）
             val networkRequiredRoutes = setOf(Routes.EMPTY_ROOM, Routes.NOTIFICATION)
             val onNavigateWithNetCheck: (String) -> Unit = { route ->
@@ -1418,6 +1477,11 @@ private fun MainScreen(navController: NavHostController, loginState: AppLoginSta
             }
 
             // 自动登录 SuperBottomSheet（可取消，15s超时）
+            BackHandler(enabled = showAutoLoginSheet.value) {
+                autoLoginJob?.cancel()
+                showAutoLoginSheet.value = false
+                autoLoginJob = null
+            }
             SuperBottomSheet(
                 show = showAutoLoginSheet,
                 title = "自动登录",
@@ -1453,7 +1517,6 @@ private fun MainScreen(navController: NavHostController, loginState: AppLoginSta
         }
     }
 }
-
 // ══════════════════════════════════════════
 //  Tab 1 — 首页
 // ══════════════════════════════════════════
@@ -1567,7 +1630,7 @@ private fun HomeTab(
             var isRefreshingCard by remember { mutableStateOf(false) }
 
             LaunchedEffect(Unit) {
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     try {
                         val dataCache = com.xjtu.toolbox.util.DataCache(context)
                         val gson = com.google.gson.Gson()
@@ -1577,14 +1640,27 @@ private fun HomeTab(
                             gson.fromJson(termListJson, Array<String>::class.java)?.toList() ?: emptyList()
                         } else emptyList<String>()
                         val termCode = termList.firstOrNull() ?: return@withContext
-                        // 获取课程
-                        val coursesJson = dataCache.get("schedule_$termCode", Long.MAX_VALUE) ?: return@withContext
-                        val courses = gson.fromJson(coursesJson, Array<com.xjtu.toolbox.schedule.CourseItem>::class.java)?.toList() ?: return@withContext
+                        // 获取 API 课程
+                        val coursesJson = dataCache.get("schedule_$termCode", Long.MAX_VALUE)
+                        val apiCourses = if (coursesJson != null) {
+                            gson.fromJson(coursesJson, Array<com.xjtu.toolbox.schedule.CourseItem>::class.java)?.toList() ?: emptyList()
+                        } else emptyList()
+                        // 获取自定义课程（Room DB）
+                        val customCourses = try {
+                            com.xjtu.toolbox.util.AppDatabase.getInstance(context)
+                                .customCourseDao().getByTerm(termCode)
+                                .map { it.toCourseItem() }
+                        } catch (_: Exception) { emptyList() }
+                        val courses = apiCourses + customCourses
                         // 获取学期开始日期
                         val startDateJson = dataCache.get("start_date_$termCode", Long.MAX_VALUE)
                         val startDateStr = if (startDateJson != null) gson.fromJson(startDateJson, String::class.java) else null
                         val startDate = if (!startDateStr.isNullOrBlank()) runCatching { java.time.LocalDate.parse(startDateStr) }.getOrNull() else null
-                        if (startDate == null) return@withContext
+                        if (startDate == null) {
+                            // 即使没有开始日期，也不能直接 return — 自定义课程可能也需要展示
+                            todayCoursesState = emptyList()
+                            return@withContext
+                        }
                         val today = java.time.LocalDate.now()
                         val daysBetween = java.time.temporal.ChronoUnit.DAYS.between(startDate, today)
                         val currentWeek = ((daysBetween / 7) + 1).toInt()
@@ -1838,6 +1914,7 @@ private fun HomeTab(
             val svcBrown = androidx.compose.ui.graphics.Color(0xFF4E342E)
             val svcCyan = androidx.compose.ui.graphics.Color(0xFF00838F)
             val svcPink = androidx.compose.ui.graphics.Color(0xFFC2185B)
+            val svcDeepPurple = androidx.compose.ui.graphics.Color(0xFF512DA8)
             svcRow(
                 { m -> HomeServiceCard(Icons.Default.CreditCard, "校园卡", "余额 · 账单", svcGreen, m) { onNavigateWithLogin(Routes.CAMPUS_CARD, LoginType.CAMPUS_CARD) } },
                 { m -> HomeServiceCard(Icons.Default.CalendarMonth, "课表考试", "课表 · 考试", svcIndigo, m) { onNavigateWithLogin(Routes.SCHEDULE, LoginType.JWXT) } }
@@ -1847,8 +1924,8 @@ private fun HomeTab(
                 { m -> HomeServiceCard(Icons.Default.QrCode, "付款码", "校园支付", svcTeal, m) { onNavigateWithLogin(Routes.PAYMENT_CODE, LoginType.JWXT) } }
             )
             svcRow(
-                { m -> HomeServiceCard(Icons.Default.AccountTree, "培养进度", "选课 · 方案", svcCyan, m) { onNavigateWithLogin(Routes.CURRICULUM, LoginType.JWXT) } },
-                { m -> HomeServiceCard(Icons.Default.DateRange, "考勤查询", "进出记录", svcBrown, m) { onNavigateWithLogin(Routes.ATTENDANCE, LoginType.ATTENDANCE) } }
+                { m -> HomeServiceCard(Icons.Default.DateRange, "考勤查询", "进出记录", svcBrown, m) { onNavigateWithLogin(Routes.ATTENDANCE, LoginType.ATTENDANCE) } },
+                { m -> HomeServiceCard(Icons.Default.Description, "电子成绩单", "下载 · 签章", svcIndigo, m) { onNavigateWithLogin(Routes.TRANSCRIPT, LoginType.DZPZ) } }
             )
             svcRow(
                 { m -> HomeServiceCard(Icons.Default.RateReview, "本科评教", "自动评教", svcPink, m) { onNavigateWithLogin(Routes.JUDGE, LoginType.JWXT) } },
@@ -1859,11 +1936,12 @@ private fun HomeTab(
                 { m -> HomeServiceCard(Icons.Default.Notifications, "通知公告", "校园通知", MiuixTheme.colorScheme.error, m) { onNavigate(Routes.NOTIFICATION) } }
             )
             svcRow(
-                { m -> HomeServiceCard(Icons.Default.Description, "电子成绩单", "下载 · 签章", svcIndigo, m) { onNavigateWithLogin(Routes.TRANSCRIPT, LoginType.DZPZ) } },
+                { m -> HomeServiceCard(Icons.Default.Place, "场馆预订", "运动场地", svcCyan, m) { onNavigateWithLogin(Routes.VENUE, LoginType.VENUE) } },
+                { m -> HomeServiceCard(Icons.Default.OndemandVideo, "课程回放", "录播回看", svcDeepPurple, m) { onNavigateWithLogin(Routes.CLASS_REPLAY, LoginType.CLASS) } },
             )
         }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(100.dp))
     }
 }
 
@@ -1891,13 +1969,14 @@ private fun AcademicTab(loginState: AppLoginState, onNavigateWithLogin: (String,
         val cGreen = androidx.compose.ui.graphics.Color(0xFF2E7D32)
         val cTeal = androidx.compose.ui.graphics.Color(0xFF00796B)
         val cOrange = androidx.compose.ui.graphics.Color(0xFFE65100)
+        val cDeepPurple = androidx.compose.ui.graphics.Color(0xFF512DA8)
 
         SectionLabel("本科生")
         ServiceCard(Icons.Default.CalendarMonth, "课表 / 考试", "课表安排 · 考试时间 · 教材查询", loginState.jwxtLogin != null, iconColor = cIndigo) { onNavigateWithLogin(Routes.SCHEDULE, LoginType.JWXT) }
         ServiceCard(Icons.Default.Assessment, "成绩查询", "查看成绩 / GPA / 含报表补充", loginState.jwappLogin != null, iconColor = cPurple) { onNavigateWithLogin(Routes.JWAPP_SCORE, LoginType.JWAPP) }
         ServiceCard(Icons.Default.DateRange, "考勤查询", "查看进出校园记录", loginState.attendanceLogin != null, iconColor = cBrown) { onNavigateWithLogin(Routes.ATTENDANCE, LoginType.ATTENDANCE) }
         ServiceCard(Icons.Default.RateReview, "本科评教", "一键自动评教", loginState.jwxtLogin != null, iconColor = cPink) { onNavigateWithLogin(Routes.JUDGE, LoginType.JWXT) }
-        ServiceCard(Icons.Default.AccountTree, "培养进度", "培养方案 · 选课进度 · 逾期提醒", loginState.jwxtLogin != null, iconColor = cCyan) { onNavigateWithLogin(Routes.CURRICULUM, LoginType.JWXT) }
+
 
         Spacer(Modifier.height(16.dp))
 
@@ -1905,8 +1984,10 @@ private fun AcademicTab(loginState: AppLoginState, onNavigateWithLogin: (String,
         ServiceCard(Icons.Default.CreditCard, "校园卡", "余额查询 / 消费账单 / 分析", loginState.campusCardLogin != null, iconColor = cGreen) { onNavigateWithLogin(Routes.CAMPUS_CARD, LoginType.CAMPUS_CARD) }
         ServiceCard(Icons.Default.QrCode, "付款码", "校园支付 · 点击即用", loginState.getSharedClient() != null, iconColor = cTeal) { onNavigateWithLogin(Routes.PAYMENT_CODE, LoginType.JWXT) }
         ServiceCard(Icons.Default.Chair, "图书馆座位", "查询 · 预约座位", loginState.libraryLogin != null, iconColor = cOrange) { onNavigateWithLogin(Routes.LIBRARY, LoginType.LIBRARY) }
+        ServiceCard(Icons.Default.Place, "场馆预订", "体育场馆 · 运动场地预订", loginState.venueLogin != null, iconColor = cCyan) { onNavigateWithLogin(Routes.VENUE, LoginType.VENUE) }
+        ServiceCard(Icons.Default.OndemandVideo, "课程回放", "课程录播 · 倍速回看", loginState.classLogin != null, iconColor = cDeepPurple) { onNavigateWithLogin(Routes.CLASS_REPLAY, LoginType.CLASS) }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(100.dp))
     }
 }
 
@@ -1999,7 +2080,7 @@ private fun ToolsTab(onNavigate: (String) -> Unit, scrollBehavior: ScrollBehavio
             }
         }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(100.dp))
     }
 }
 
@@ -2175,6 +2256,12 @@ private fun ProfileTab(loginState: AppLoginState, onNavigateWithLogin: (String, 
     val showMfaDialog = remember { mutableStateOf(false) }
     LaunchedEffect(mfaLogin) { showMfaDialog.value = mfaLogin != null }
     if (mfaLogin != null) {
+        BackHandler(enabled = showMfaDialog.value) {
+            showMfaDialog.value = false
+            mfaLogin = null
+            mfaCode = ""
+            mfaError = null
+        }
         SuperBottomSheet(
             show = showMfaDialog,
             title = "两步验证",
@@ -2185,80 +2272,88 @@ private fun ProfileTab(loginState: AppLoginState, onNavigateWithLogin: (String, 
                 mfaError = null
             }
         ) {
-            Text("需要短信验证码完成登录", style = MiuixTheme.textStyles.body1)
-            Spacer(Modifier.height(8.dp))
-            Text("手机号: $mfaPhone", style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Medium)
-            Spacer(Modifier.height(12.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .imePadding()
+            ) {
+                Text("需要短信验证码完成登录", style = MiuixTheme.textStyles.body1)
+                Spacer(Modifier.height(8.dp))
+                Text("手机号: $mfaPhone", style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.height(12.dp))
 
-            // 发送验证码按钮
-            if (!mfaCodeSent) {
-                Button(
-                    onClick = {
-                        mfaSending = true
-                        mfaError = null
-                        scope.launch {
-                            try {
-                                val login = mfaLogin ?: run { mfaError = "MFA 会话丢失"; return@launch }
-                                val ctx = login.mfaContext ?: run { mfaError = "MFA 上下文丢失"; return@launch }
-                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                    ctx.sendVerifyCode()
-                                }
-                                mfaCodeSent = true
-                            } catch (e: Exception) {
-                                mfaError = "发送失败: ${e.message}"
-                            }
-                            mfaSending = false
-                        }
-                    },
-                    enabled = !mfaSending,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    if (mfaSending) {
-                        CircularProgressIndicator(size = 18.dp, strokeWidth = 2.dp)
-                        Spacer(Modifier.width(8.dp))
-                    }
-                    Text(if (mfaSending) "发送中..." else "发送验证码")
-                }
-            } else {
-                // 验证码输入
-                TextField(
-                    value = mfaCode,
-                    onValueChange = { mfaCode = it; mfaError = null },
-                    label = "验证码",
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                )
-                if (mfaError != null) {
-                    Text(mfaError!!, color = MiuixTheme.colorScheme.error, style = MiuixTheme.textStyles.footnote1, modifier = Modifier.padding(start = 4.dp, top = 2.dp))
-                }
-            }
-
-            Spacer(Modifier.height(20.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(
-                    onClick = {
-                        showMfaDialog.value = false
-                        mfaLogin = null
-                        mfaCode = ""
-                        mfaError = null
-                    },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(color = MiuixTheme.colorScheme.secondaryContainer)
-                ) { Text("取消", color = MiuixTheme.colorScheme.onSecondaryContainer) }
-                if (mfaCodeSent) {
+                // 发送验证码按钮
+                if (!mfaCodeSent) {
                     Button(
-                        onClick = { finishMfaAndLogin() },
-                        enabled = mfaCode.length >= 4 && !mfaVerifying,
-                        modifier = Modifier.weight(1f)
+                        onClick = {
+                            mfaSending = true
+                            mfaError = null
+                            scope.launch {
+                                try {
+                                    val login = mfaLogin ?: run { mfaError = "MFA 会话丢失"; return@launch }
+                                    val ctx = login.mfaContext ?: run { mfaError = "MFA 上下文丢失"; return@launch }
+                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                        ctx.sendVerifyCode()
+                                    }
+                                    mfaCodeSent = true
+                                } catch (e: Exception) {
+                                    mfaError = "发送失败: ${e.message}"
+                                }
+                                mfaSending = false
+                            }
+                        },
+                        enabled = !mfaSending,
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        if (mfaVerifying) {
-                            CircularProgressIndicator(size = 16.dp, strokeWidth = 2.dp)
-                            Spacer(Modifier.width(4.dp))
+                        if (mfaSending) {
+                            CircularProgressIndicator(size = 18.dp, strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
                         }
-                        Text(if (mfaVerifying) "验证中..." else "验证并登录")
+                        Text(if (mfaSending) "发送中..." else "发送验证码")
+                    }
+                } else {
+                    // 验证码输入
+                    TextField(
+                        value = mfaCode,
+                        onValueChange = { mfaCode = it; mfaError = null },
+                        label = "验证码",
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
+                    if (mfaError != null) {
+                        Text(mfaError!!, color = MiuixTheme.colorScheme.error, style = MiuixTheme.textStyles.footnote1, modifier = Modifier.padding(start = 4.dp, top = 2.dp))
                     }
                 }
+
+                Spacer(Modifier.height(20.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TextButton(
+                        text = "取消",
+                        onClick = {
+                            showMfaDialog.value = false
+                            mfaLogin = null
+                            mfaCode = ""
+                            mfaError = null
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (mfaCodeSent) {
+                        Button(
+                            onClick = { finishMfaAndLogin() },
+                            enabled = mfaCode.length >= 4 && !mfaVerifying,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            if (mfaVerifying) {
+                                CircularProgressIndicator(size = 16.dp, strokeWidth = 2.dp)
+                                Spacer(Modifier.width(4.dp))
+                            }
+                            Text(if (mfaVerifying) "验证中..." else "验证并登录")
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
             }
         }
     }
@@ -2781,6 +2876,7 @@ private fun ProfileTab(loginState: AppLoginState, onNavigateWithLogin: (String, 
                         }
 
                         if (showLogoutDialog.value) {
+                            BackHandler { showLogoutDialog.value = false }
                             SuperDialog(
                                 show = showLogoutDialog,
                                 title = "确认退出",
@@ -2989,7 +3085,8 @@ private fun ProfileTab(loginState: AppLoginState, onNavigateWithLogin: (String, 
                         if (latestDownloadUrl != null && updateCheckState != null && !updateCheckState!!.startsWith("error:") && updateCheckState != "latest" && updateCheckState != "checking") {
                             Button(
                                 onClick = { uriHandler.openUri(latestDownloadUrl!!) },
-                                modifier = Modifier.height(32.dp),
+                                modifier = Modifier,
+                                insideMargin = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                                 colors = ButtonDefaults.buttonColors(color = MiuixTheme.colorScheme.primary)
                             ) {
                                 Icon(Icons.Default.Download, null, Modifier.size(14.dp), tint = MiuixTheme.colorScheme.onPrimary)
@@ -3031,10 +3128,9 @@ private fun ProfileTab(loginState: AppLoginState, onNavigateWithLogin: (String, 
                             Column(Modifier.padding(start = 20.dp, end = 20.dp, bottom = 14.dp)) {
                                 val plans = listOf(
                                     "图书馆定时抢座",
-                                    "空闲区域分析 & 座位推荐",
-                                    "智能抢课",
+                                    "智能选课",
                                     "通知聚合订阅 & Push",
-                                    "电子成绩单获取与签印分析",
+                                    "电子教材在线阅读",
                                     "思源学堂解析版"
                                 )
                                 plans.forEachIndexed { idx, plan ->
@@ -3055,7 +3151,7 @@ private fun ProfileTab(loginState: AppLoginState, onNavigateWithLogin: (String, 
             }
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(100.dp))
     }
 }
 
@@ -3216,6 +3312,56 @@ private fun EulaScreen(onAccept: () -> Unit) {
         }
     }
 
+    val boldStyle = androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold, color = MiuixTheme.colorScheme.primary)
+
+    // 条款数据 —— title + AnnotatedString body（关键语句加粗）
+    data class EulaSection(val title: String, val body: androidx.compose.ui.text.AnnotatedString)
+    val sections = listOf(
+        EulaSection(
+            "一、应用性质",
+            androidx.compose.ui.text.buildAnnotatedString {
+                append("本应用（「岱宗盒子」）是西安交通大学学生自主开发的非官方校园工具，")
+                pushStyle(boldStyle); append("完全开源、无毒无害"); pop()
+                append("，通过模拟浏览器行为访问学校现有的 Web 服务接口，为学生提供统一便捷的校园信息查询体验。本应用不隶属于、不代表西安交通大学或其任何部门。")
+            }
+        ),
+        EulaSection(
+            "二、数据来源与使用",
+            androidx.compose.ui.text.buildAnnotatedString {
+                append("本应用通过 HTTPS 协议访问学校公开的各业务系统接口获取数据，所有网络请求均在您的设备上发起。您的账号凭据（用户名和密码）仅加密存储在本地设备中，不会上传至任何第三方服务器。")
+                pushStyle(boldStyle); append("本应用不收集、不存储、不上载任何用户隐私信息至开发者或第三方。"); pop()
+            }
+        ),
+        EulaSection(
+            "三、免责声明",
+            androidx.compose.ui.text.buildAnnotatedString {
+                append("1. 本应用按「按原样」（AS IS）提供，开发者不对其准确性、完整性、可用性或适用性作任何明示或暗示的保证。\n2. 因使用本应用导致的任何直接或间接损失（包括但不限于数据丢失、账号异常、学业影响等），开发者不承担任何责任。\n3. 若学校系统接口变更导致功能异常，开发者将尽力修复但不保证时效。\n4. 本应用可能因学校政策调整而需要停止服务，届时将提前告知用户。")
+            }
+        ),
+        EulaSection(
+            "四、合规声明",
+            androidx.compose.ui.text.buildAnnotatedString {
+                append("1. 本应用仅供西安交通大学在校师生个人学习和生活使用，严禁用于任何商业用途。\n2. ")
+                pushStyle(boldStyle); append("本应用不提供抢选、抢课、刷分等牟利功能。"); pop()
+                append("\n3. ")
+                pushStyle(boldStyle); append("本应用不接入支付、退款等金额交易功能。"); pop()
+                append("\n4. 使用者应遵守学校各系统的使用规定和信息安全管理条例。\n5. 严禁利用本应用进行恶意请求、数据爬取、接口滥用等行为。违者应自行承担相应法律责任。")
+            }
+        ),
+        EulaSection(
+            "五、知识产权",
+            androidx.compose.ui.text.buildAnnotatedString {
+                append("本应用源代码基于 MIT 协议开源，感谢相关项目的启发。所访问的各业务系统之数据、接口及商标均归西安交通大学及相关权利方所有。")
+            }
+        ),
+        EulaSection(
+            "六、条款变更",
+            androidx.compose.ui.text.buildAnnotatedString {
+                append("开发者保留随时修改本协议的权利。更新后的协议将在新版本发布时生效，继续使用本应用即视为接受修改后的条款。")
+            }
+        )
+    )
+
     Scaffold(
         topBar = {
             top.yukonga.miuix.kmp.basic.TopAppBar(
@@ -3246,19 +3392,11 @@ private fun EulaScreen(onAccept: () -> Unit) {
                 colors = top.yukonga.miuix.kmp.basic.CardDefaults.defaultColors(color = MiuixTheme.colorScheme.surfaceVariant)
             ) {
                 Column(Modifier.padding(16.dp)) {
-                    val sections = listOf(
-                        "一、应用性质" to "本应用（「岱宗盒子」）是西安交通大学学生自主开发的非官方校园工具，通过模拟浏览器行为访问学校现有的 Web 服务接口，为学生提供统一便捷的校园信息查询体验。本应用不隶属于、不代表西安交通大学或其任何部门。",
-                        "二、数据来源与使用" to "本应用通过 HTTPS 协议访问学校公开的各业务系统接口获取数据，所有网络请求均在您的设备上发起。您的账号凭据（用户名和密码）仅加密存储在本地设备中，不会上传至任何第三方服务器。本应用不收集、不存储、不传输任何用户的个人信息至开发者或第三方。",
-                        "三、免责声明" to "1. 本应用按「按原样」（AS IS）提供，开发者不对其准确性、完整性、可用性或适用性作任何明示或暗示的保证。\n2. 因使用本应用导致的任何直接或间接损失（包括但不限于数据丢失、账号异常、学业影响等），开发者不承担任何责任。\n3. 若学校系统接口变更导致功能异常，开发者将尽力修复但不保证时效。\n4. 本应用可能因学校政策调整而需要停止服务，届时将提前告知用户。",
-                        "四、合规声明" to "1. 本应用仅供西安交通大学在校师生个人学习和生活使用，严禁用于任何商业用途。\n2. 使用者应遵守学校各系统的使用规定和信息安全管理条例。\n3. 严禁利用本应用进行恶意请求、数据爬取、接口滥用等行为。违者应自行承担相应法律责任。",
-                        "五、知识产权" to "本应用源代码基于 MIT 协议开源，感谢相关项目的启发。所访问的各业务系统之数据、接口及商标均归西安交通大学及相关权利方所有。",
-                        "六、条款变更" to "开发者保留随时修改本协议的权利。更新后的协议将在新版本发布时生效，继续使用本应用即视为接受修改后的条款。"
-                    )
-                    sections.forEachIndexed { idx, (title, body) ->
+                    sections.forEachIndexed { idx, section ->
                         if (idx > 0) Spacer(Modifier.height(12.dp))
-                        Text(title, style = MiuixTheme.textStyles.subtitle, fontWeight = FontWeight.Bold, color = MiuixTheme.colorScheme.primary)
+                        Text(section.title, style = MiuixTheme.textStyles.subtitle, fontWeight = FontWeight.Bold, color = MiuixTheme.colorScheme.primary)
                         Spacer(Modifier.height(4.dp))
-                        Text(body, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurface, lineHeight = 18.sp)
+                        Text(section.body, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurface, lineHeight = 20.sp)
                     }
                 }
             }
@@ -3291,11 +3429,63 @@ private fun EulaScreen(onAccept: () -> Unit) {
 }
 
 // ══════════════════════════════════════════
-//  版本更新公告弹窗
+//  版本更新公告弹窗 —— 版本化日志注册表
 // ══════════════════════════════════════════
+
+/**
+ * 每个版本的更新日志。
+ * key = versionName，value = (更新项列表, 已知问题列表)。
+ * ⚠️ 发版前必须为当前 versionName 添加条目，否则编译期 init{} 会崩溃。
+ */
+private data class VersionChangelog(
+    val items: List<Pair<String, String>>,
+    val issues: List<String> = emptyList()
+)
+
+private val CHANGELOGS: Map<String, VersionChangelog> = mapOf(
+    "2.3.2" to VersionChangelog(
+        items = listOf(
+            "🎉" to "正式版来了！感谢参与内测的山东老乡！",
+            "🔐" to "接入学工系统，可查看详细信息。",
+            "📸" to "新增成绩单下载，绕开限制；成绩查询纳入未评教成绩",
+            "💳" to "图书馆智能座位推荐、地图选座V2。",
+            "🏠" to "UI改版，使用MIUIX开源的HyperOS设计语言。",
+            "👍" to "大量Bug修复与人性化改进！"
+        ),
+        issues = listOf(
+            "图书馆定时抢座功能待修复",
+            "通知推送功能有待优化",
+            "校园卡登录偶尔失败（教务 Token 获取）"
+        )
+    ),
+    "2.5.0" to VersionChangelog(
+        items = listOf(
+            "🎓" to "新增课程回放功能（教学平台 TronClass）",
+            "🏟️" to "新增体育场馆预订",
+            "📜" to "用户协议更新",
+            "📚" to "图书馆状态优化",
+            "🔄" to "视频播放器修复",
+            "�" to "移除定时抢座功能，避免风险",
+            "👍" to "大量UI优化与Bug修复"
+        ),
+        issues = listOf(
+            "通知推送功能有待优化"
+        )
+    )
+)
+
+// 编译期校验：确保当前版本号有对应的更新日志
+private val _changelogCheck = run {
+    val currentVersion = BuildConfig.VERSION_NAME
+    require(CHANGELOGS.containsKey(currentVersion)) {
+        "⚠️ 版本 $currentVersion 没有对应的更新日志！请在 CHANGELOGS 中添加条目。"
+    }
+}
 
 @Composable
 private fun UpdateNoticeDialog(show: MutableState<Boolean>, onDismiss: () -> Unit) {
+    val changelog = CHANGELOGS[BuildConfig.VERSION_NAME] ?: return
+    BackHandler(enabled = show.value) { onDismiss() }
     SuperBottomSheet(
         show = show,
         title = "岱宗盒子 v${BuildConfig.VERSION_NAME}",
@@ -3303,15 +3493,7 @@ private fun UpdateNoticeDialog(show: MutableState<Boolean>, onDismiss: () -> Uni
     ) {
         Text("更新说明", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
         Spacer(Modifier.height(8.dp))
-        val items = listOf(
-            "🎉" to "正式版来了！感谢参与内测的山东老乡！",
-            "🔐" to "接入学工系统，可查看详细信息。",
-            "📸" to "新增成绩单下载，绕开限制；成绩查询纳入未评教成绩",
-            "💳" to "图书馆智能座位推荐、地图选座V2。",
-            "🏠" to "UI改版，使用MIUIX开源的HyperOS设计语言。",
-            "👍" to "大量Bug修复与人性化改进！"
-        )
-        items.forEach { (emoji, text) ->
+        changelog.items.forEach { (emoji, text) ->
             Row(Modifier.padding(vertical = 3.dp)) {
                 Text(emoji, style = MiuixTheme.textStyles.body1)
                 Spacer(Modifier.width(8.dp))
@@ -3319,22 +3501,19 @@ private fun UpdateNoticeDialog(show: MutableState<Boolean>, onDismiss: () -> Uni
             }
         }
 
-        Spacer(Modifier.height(12.dp))
-        HorizontalDivider(color = MiuixTheme.colorScheme.outline.copy(alpha = 0.3f))
-        Spacer(Modifier.height(12.dp))
+        if (changelog.issues.isNotEmpty()) {
+            Spacer(Modifier.height(12.dp))
+            HorizontalDivider(color = MiuixTheme.colorScheme.outline.copy(alpha = 0.3f))
+            Spacer(Modifier.height(12.dp))
 
-        Text("已知问题", style = MiuixTheme.textStyles.subtitle, fontWeight = FontWeight.Bold, color = MiuixTheme.colorScheme.error)
-        Spacer(Modifier.height(6.dp))
-        val issues = listOf(
-            "图书馆定时抢座功能待修复",
-            "通知推送功能有待优化",
-            "校园卡登录偶尔失败（教务 Token 获取）"
-        )
-        issues.forEach { issue ->
-            Row(Modifier.padding(vertical = 2.dp)) {
-                Text("•", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.outline)
-                Spacer(Modifier.width(6.dp))
-                Text(issue, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+            Text("已知问题", style = MiuixTheme.textStyles.subtitle, fontWeight = FontWeight.Bold, color = MiuixTheme.colorScheme.error)
+            Spacer(Modifier.height(6.dp))
+            changelog.issues.forEach { issue ->
+                Row(Modifier.padding(vertical = 2.dp)) {
+                    Text("•", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.outline)
+                    Spacer(Modifier.width(6.dp))
+                    Text(issue, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                }
             }
         }
         Spacer(Modifier.height(16.dp))

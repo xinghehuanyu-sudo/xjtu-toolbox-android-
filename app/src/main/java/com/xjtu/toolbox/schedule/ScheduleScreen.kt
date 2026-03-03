@@ -1,5 +1,6 @@
 package com.xjtu.toolbox.schedule
 
+import androidx.activity.compose.BackHandler
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
@@ -760,6 +761,7 @@ private fun ScheduleTabContent(
 
 @Composable
 private fun CourseDetailDialog(show: MutableState<Boolean>, course: CourseItem, onDismiss: () -> Unit) {
+    BackHandler(enabled = show.value) { show.value = false; onDismiss() }
     SuperBottomSheet(
         show = show,
         title = course.courseName,

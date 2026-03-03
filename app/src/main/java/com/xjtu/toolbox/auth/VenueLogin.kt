@@ -1,0 +1,167 @@
+package com.xjtu.toolbox.auth
+
+import android.util.Log
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+
+/**
+ * 体育场馆预订系统登录 (202.117.17.144)
+ *
+ * 认证链路（CAS OAuth2.0 → org.xjtu.edu.cn 中转）：
+ * 1. 访问 CAS OAuth2 authorize (client_id=1439)
+ * 2. CAS 登录成功 → callbackAuthorize → org.xjtu.edu.cn/authorizesw
+ * 3. org.xjtu.edu.cn 302 → http://202.117.17.144/xjtu/cas/oauth2url.html?code=...&employeeNo=...
+ * 4. 202.117.17.144 设置 JSESSIONID → 302 → index.html
+ *
+ * 会话凭据: JSESSIONID cookie (on 202.117.17.144)
+ */
+class VenueLogin(
+    session: OkHttpClient? = null,
+    visitorId: String? = null,
+    cachedRsaKey: String? = null
+) : XJTULogin(
+    loginUrl = VENUE_OAUTH_URL,
+    existingClient = session,
+    visitorId = visitorId,
+    cachedRsaKey = cachedRsaKey
+) {
+    companion object {
+        private const val TAG = "VenueLogin"
+
+        /** 场馆系统基础地址 */
+        const val BASE_URL = "http://202.117.17.144"
+
+        /**
+         * CAS OAuth2.0 授权 URL
+         * client_id=1439 → 体育场馆预订平台
+         * redirect_uri → org.xjtu.edu.cn 中转后回调到 202.117.17.144
+         */
+        const val VENUE_OAUTH_URL =
+            "https://login.xjtu.edu.cn/cas/oauth2.0/authorize?" +
+            "response_type=code&client_id=1439&" +
+            "redirect_uri=https%3A%2F%2Forg.xjtu.edu.cn%2Fopenplatform%2Foauth%2Fauthorizesw" +
+            "%3Fredirect_uri%3Dhttp%3A%2F%2F202.117.17.144%2Fxjtu%2Fcas%2Foauth2url.html&" +
+            "state=1"
+    }
+
+    /** 登录后是否已获取有效 session */
+    var sessionValid: Boolean = false
+        private set
+
+    override fun postLogin(response: Response) {
+        // OkHttp 自动跟随重定向链，最终到达 202.117.17.144/index.html
+        // JSESSIONID 已自动存入 CookieJar
+        val finalUrl = response.request.url.toString()
+        Log.d(TAG, "postLogin: finalUrl=$finalUrl")
+
+        if (finalUrl.contains("202.117.17.144")) {
+            sessionValid = true
+            Log.d(TAG, "postLogin: session established via redirect chain")
+            return
+        }
+
+        // 如果最终 URL 不在 202.117.17.144，尝试手动访问首页触发 session
+        Log.d(TAG, "postLogin: not at venue site, manually accessing index")
+        try {
+            val indexReq = Request.Builder()
+                .url("$BASE_URL/index.html")
+                .get()
+                .build()
+            val indexResp = client.newCall(indexReq).execute()
+            val indexFinalUrl = indexResp.request.url.toString()
+            indexResp.close()
+
+            sessionValid = indexFinalUrl.contains("202.117.17.144") &&
+                !indexFinalUrl.contains("login.xjtu.edu.cn")
+            Log.d(TAG, "postLogin: manual access finalUrl=$indexFinalUrl, valid=$sessionValid")
+        } catch (e: Exception) {
+            Log.e(TAG, "postLogin: manual access failed", e)
+        }
+
+        if (!sessionValid) {
+            throw RuntimeException("登录失败：无法建立场馆系统会话")
+        }
+    }
+
+    /**
+     * 构建带 session cookies 的请求
+     */
+    fun authenticatedRequest(url: String): Request.Builder {
+        return Request.Builder()
+            .url(url)
+            .header("Referer", "$BASE_URL/product/index.html")
+    }
+
+    private val reAuthLock = Any()
+
+    /**
+     * 重新认证
+     */
+    fun reAuthenticate(): Boolean = synchronized(reAuthLock) {
+        try {
+            // 检查 session 是否仍有效
+            val checkReq = Request.Builder()
+                .url("$BASE_URL/product/index.html")
+                .get()
+                .build()
+            val checkResp = client.newCall(checkReq).execute()
+            val finalUrl = checkResp.request.url.toString()
+            val body = checkResp.body?.string() ?: ""
+            checkResp.close()
+
+            if (finalUrl.contains("202.117.17.144") &&
+                !finalUrl.contains("login.xjtu.edu.cn") &&
+                body.contains("product/show.html")) {
+                Log.d(TAG, "reAuthenticate: session still valid")
+                sessionValid = true
+                return true
+            }
+
+            // SSO 方式
+            Log.d(TAG, "reAuthenticate: session expired, trying SSO")
+            val ssoReq = Request.Builder().url(VENUE_OAUTH_URL).get().build()
+            val ssoResp = client.newCall(ssoReq).execute()
+            val ssoFinalUrl = ssoResp.request.url.toString()
+            ssoResp.close()
+
+            if (ssoFinalUrl.contains("202.117.17.144") &&
+                !ssoFinalUrl.contains("login.xjtu.edu.cn")) {
+                sessionValid = true
+                Log.d(TAG, "reAuthenticate: SSO success")
+                return true
+            }
+
+            // fallback: casAuthenticate
+            Log.d(TAG, "reAuthenticate: SSO failed, trying casAuthenticate")
+            val casResult = casAuthenticate(VENUE_OAUTH_URL) ?: return false
+            if (casResult.second.contains("202.117.17.144") &&
+                !casResult.second.contains("login.xjtu.edu.cn")) {
+                sessionValid = true
+                Log.d(TAG, "reAuthenticate: casAuthenticate success")
+                return true
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "reAuthenticate failed", e)
+        }
+        sessionValid = false
+        return@synchronized false
+    }
+
+    /**
+     * 执行带自动重认证的请求
+     */
+    fun executeWithReAuth(request: Request.Builder): Response {
+        val response = client.newCall(request.build()).execute()
+        val finalUrl = response.request.url.toString()
+
+        if (finalUrl.contains("login.xjtu.edu.cn") || response.code in listOf(401, 403)) {
+            response.close()
+            if (reAuthenticate()) {
+                return client.newCall(request.build()).execute()
+            }
+        }
+        return response
+    }
+}

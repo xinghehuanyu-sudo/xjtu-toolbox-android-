@@ -158,7 +158,7 @@ class CredentialStore(context: Context) {
         private const val NSA_PHOTO_FILE = "nsa_photo.jpg"
         private const val KEY_EULA_VERSION = "eula_accepted_version"
         /** 用户协议版本号，更新协议内容时递增 */
-        const val CURRENT_EULA_VERSION = 1
+        const val CURRENT_EULA_VERSION = 2
     }
 }
 

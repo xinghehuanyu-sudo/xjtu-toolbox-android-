@@ -21,6 +21,7 @@ import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.extra.SuperBottomSheet
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
@@ -45,7 +46,6 @@ import androidx.compose.material.icons.filled.EventSeat
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.ViewModule
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
@@ -88,6 +88,48 @@ fun LibraryScreen(login: LibraryLogin, onBack: () -> Unit) {
     val api = remember { LibraryApi(login) }
     val context = LocalContext.current
 
+    // ── 首次使用提示 ──
+    val prefs = remember { context.getSharedPreferences("feature_hints", Context.MODE_PRIVATE) }
+    val showHint = remember { mutableStateOf(!prefs.getBoolean("library_hint_shown", false)) }
+    if (showHint.value) {
+        BackHandler { showHint.value = false; prefs.edit().putBoolean("library_hint_shown", true).apply() }
+        SuperBottomSheet(
+            show = showHint,
+            title = "图书馆座位预约",
+            onDismissRequest = {
+                showHint.value = false
+                prefs.edit().putBoolean("library_hint_shown", true).apply()
+            }
+        ) {
+            Column(Modifier.padding(bottom = 16.dp).navigationBarsPadding()) {
+                Text("使用说明", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                Spacer(Modifier.height(8.dp))
+
+                val tips = listOf(
+                    "💡" to "智能推荐算法会根据「桌组空闲度、邻座占用率、是否靠墙/角落、离入口距离」等因素为你打分推荐最佳座位。",
+                    "⏰" to "预约成功后，请在 30 分钟内入馆签到，否则当日将被禁止线上预约。",
+                    "📋" to "座位状态说明：「使用中」= 已签到入座；「已预约」 = 已预约未签到；「暂离」= 短暂离开保留中。",
+                    "🚫" to "本版本已移除定时抢座功能。频繁自动化请求可能触发学校系统风控，导致账号被限制使用图书馆服务，望理解。"
+                )
+                tips.forEach { (emoji, text) ->
+                    Row(Modifier.padding(vertical = 4.dp)) {
+                        Text(emoji, style = MiuixTheme.textStyles.body1)
+                        Spacer(Modifier.width(8.dp))
+                        Text(text, style = MiuixTheme.textStyles.body2, modifier = Modifier.weight(1f))
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+                Button(
+                    onClick = {
+                        showHint.value = false
+                        prefs.edit().putBoolean("library_hint_shown", true).apply()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("知道了") }
+            }
+        }
+    }
+
     // 座位数据
     var seats by remember { mutableStateOf<List<SeatInfo>>(emptyList()) }
     var areaStatsMap by remember { mutableStateOf<Map<String, AreaStats>>(emptyMap()) }
@@ -116,12 +158,6 @@ fun LibraryScreen(login: LibraryLogin, onBack: () -> Unit) {
 
     // 收藏
     var favorites by remember { mutableStateOf(loadFavorites(context)) }
-
-    // 定时抢座
-    var showGrabDialog by remember { mutableStateOf(false) }
-    var grabScheduled by remember { mutableStateOf(SeatGrabScheduler.isScheduled(context)) }
-    var grabConfig by remember { mutableStateOf(SeatGrabConfigStore.load(context)) }
-
 
     // ── 楼层/区域选择 ──
     val allFloors = remember { LibraryApi.FLOORS.keys.toList() }
@@ -274,31 +310,6 @@ fun LibraryScreen(login: LibraryLogin, onBack: () -> Unit) {
     val availableCount = seats.count { it.available }
     val totalCount = seats.size
 
-    // ── 定时抢座对话框 ──
-    val showGrabDialogState = remember { mutableStateOf(false) }
-    LaunchedEffect(showGrabDialog) { showGrabDialogState.value = showGrabDialog }
-    if (showGrabDialog) {
-        SeatGrabDialog(
-            show = showGrabDialogState,
-            currentFavorites = favorites,
-            selectedArea = selectedArea,
-            onDismiss = { showGrabDialog = false },
-            onConfirm = { newConfig ->
-                SeatGrabConfigStore.save(context, newConfig)
-                grabConfig = newConfig
-                val ok = SeatGrabScheduler.schedule(context, newConfig)
-                grabScheduled = ok
-                showGrabDialog = false
-                if (ok) {
-                    bookingResult = BookResult(true, "⏰ 定时抢座已设定：${newConfig.triggerTimeStr}\n" +
-                        "目标: ${newConfig.targetSeats.joinToString { it.seatId }}")
-                } else {
-                    bookingResult = BookResult(false, "设定失败：请授予精确闹钟权限后重试")
-                }
-            }
-        )
-    }
-
     // ── 确认对话框 ──
     val showConfirmDialog = remember { mutableStateOf(false) }
     var confirmMsg by remember { mutableStateOf("") }
@@ -310,6 +321,7 @@ fun LibraryScreen(login: LibraryLogin, onBack: () -> Unit) {
             showConfirmDialog.value = true
         }
     }
+    BackHandler(enabled = showConfirmDialog.value) { showConfirmDialog.value = false; confirmDialog = null }
     SuperBottomSheet(
         show = showConfirmDialog,
         title = "确认操作",
@@ -346,28 +358,6 @@ fun LibraryScreen(login: LibraryLogin, onBack: () -> Unit) {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
                 },
                 actions = {
-                    // 定时抢座入口
-                    IconButton(onClick = {
-                        if (grabScheduled) {
-                            // 已有闹钟 → 弹确认取消
-                            confirmDialog = "已设定 ${grabConfig.triggerTimeStr} 定时抢座\n" +
-                                "目标: ${grabConfig.targetSeats.joinToString { it.seatId }}\n\n取消定时？" to {
-                                SeatGrabScheduler.cancel(context)
-                                SeatGrabConfigStore.save(context, grabConfig.copy(enabled = false))
-                                grabScheduled = false
-                                bookingResult = BookResult(true, "定时抢座已取消")
-                            }
-                        } else {
-                            showGrabDialog = true
-                        }
-                    }) {
-                        Icon(
-                            Icons.Default.Schedule,
-                            "定时抢座",
-                            tint = if (grabScheduled) MiuixTheme.colorScheme.primary
-                            else MiuixTheme.colorScheme.onSurfaceVariantSummary
-                        )
-                    }
                     IconButton(onClick = { loadSeats() }) { Icon(Icons.Default.Refresh, "刷新") }
                 }
             )
@@ -469,7 +459,7 @@ fun LibraryScreen(login: LibraryLogin, onBack: () -> Unit) {
                             else Icon(Icons.Default.Refresh, "刷新预约", Modifier.size(18.dp))
                         }
                     }
-                    val expiredStatuses = setOf("已取消", "已完成", "已过期", "已失效", "已违约", "超时取消", "超时未入馆", "超时")
+                    val expiredStatuses = setOf("已取消", "已完成", "已过期", "已失效", "已违约", "超时取消", "超时未入馆", "超时", "已离馆")
                     val isExpiredBooking = myBooking?.statusText in expiredStatuses
                     val actions = if (isExpiredBooking) null else myBooking?.actionUrls
                     if (!actions.isNullOrEmpty()) {
@@ -522,12 +512,21 @@ fun LibraryScreen(login: LibraryLogin, onBack: () -> Unit) {
                             )
                         }
                         if (areas.isNotEmpty()) {
-                            TabRowWithContour(
-                                tabs = areas.map { it.removePrefix("北楼").removePrefix("南楼").removePrefix("二层").removePrefix("三层").removePrefix("四层") },
-                                selectedTabIndex = (areas.indexOf(selectedArea)).coerceAtLeast(0),
-                                onTabSelected = { selectedArea = areas.getOrElse(it) { areas.first() } },
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
-                            )
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState())
+                                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                areas.forEach { area ->
+                                    com.xjtu.toolbox.ui.components.AppFilterChip(
+                                        selected = selectedArea == area,
+                                        onClick = { selectedArea = area },
+                                        label = area
+                                    )
+                                }
+                            }
                         }
                     }
                 }

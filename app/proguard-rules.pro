@@ -51,6 +51,10 @@
 -keep class androidx.navigationevent.** { *; }
 -dontwarn androidx.navigationevent.**
 
+# ── Haze (高斯模糊) ──────────────────
+-keep class dev.chrisbanes.haze.** { *; }
+-dontwarn dev.chrisbanes.haze.**
+
 # ── AndroidX Security (EncryptedSharedPreferences) ──
 -keep class androidx.security.crypto.** { *; }
 

@@ -419,7 +419,7 @@ class LibraryApi(private val login: LibraryLogin) {
         doc: org.jsoup.nodes.Document, bodyText: String,
         html: String, finalUrl: String
     ): MyBookingInfo? {
-        val inactiveStatuses = setOf("已取消", "已完成", "已过期", "已失效", "已违约", "超时取消", "超时未入馆", "超时")
+        val inactiveStatuses = setOf("已取消", "已完成", "已过期", "已失效", "已违约", "超时取消", "超时未入馆", "超时", "已离馆")
 
         // 按"预约状态"分割文本，找到活跃预约的文本块
         val statusRegex = Regex("""预约状态[:：]\s*(\S+)""")

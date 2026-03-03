@@ -1,5 +1,6 @@
 package com.xjtu.toolbox.judge
 
+import androidx.activity.compose.BackHandler
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
@@ -168,6 +169,7 @@ fun GsteJudgeScreen(
                 val showConfirmDialog = remember { mutableStateOf(false) }
 
                 // 确认对话框（研究生评教不可撤销，需更醒目的警告）
+                BackHandler(enabled = showConfirmDialog.value) { showConfirmDialog.value = false }
                 SuperBottomSheet(
                     show = showConfirmDialog,
                     title = "⚠️ 确认一键好评",

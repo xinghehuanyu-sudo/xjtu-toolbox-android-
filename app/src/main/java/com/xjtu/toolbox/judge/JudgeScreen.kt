@@ -1,5 +1,6 @@
 package com.xjtu.toolbox.judge
 
+import androidx.activity.compose.BackHandler
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
@@ -138,6 +139,7 @@ fun JudgeScreen(
             }
 
             // 确认对话框（提升至顶层，不受 selectedTab 条件约束）
+            BackHandler(enabled = showConfirmDialog.value) { showConfirmDialog.value = false }
             SuperBottomSheet(
                     show = showConfirmDialog,
                     title = "确认一键好评",

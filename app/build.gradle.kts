@@ -16,8 +16,8 @@ android {
         applicationId = "com.xjtu.toolbox"
         minSdk = 31
         targetSdk = 36
-        versionCode = 6
-        versionName = "2.3.2"
+        versionCode = 7
+        versionName = "2.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -85,12 +85,16 @@ dependencies {
     implementation(libs.navigation.compose)
     implementation(libs.security.crypto)
     implementation(libs.zxing.core)
+    implementation(libs.media3.exoplayer)
+    implementation(libs.media3.ui)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
     implementation("top.yukonga.miuix.kmp:miuix-android:0.8.5")
     implementation("top.yukonga.miuix.kmp:miuix-icons-android:0.8.5")
     implementation("androidx.navigationevent:navigationevent-compose-android:1.0.2")
+    implementation("dev.chrisbanes.haze:haze-android:1.7.2")
+    implementation("dev.chrisbanes.haze:haze-materials-android:1.7.2")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

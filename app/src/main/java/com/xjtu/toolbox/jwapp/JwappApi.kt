@@ -21,10 +21,7 @@ enum class ScoreSource { JWAPP, REPORT }
 
 enum class CourseGroup(val label: String, val shortLabel: String) {
     GEN_CORE("通核", "通核"),
-    GEN_ELECTIVE("通选", "通选"),
-    MAJOR_ELECTIVE("专选", "专选"),
-    CORE("核心", "核心"),
-    OUT_OF_PLAN("方案外", "外");
+    GEN_ELECTIVE("通选", "通选");
 }
 
 data class ScoreItem(

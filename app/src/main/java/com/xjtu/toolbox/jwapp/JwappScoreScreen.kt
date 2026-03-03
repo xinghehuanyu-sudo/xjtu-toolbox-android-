@@ -1,5 +1,6 @@
 package com.xjtu.toolbox.jwapp
 
+import androidx.activity.compose.BackHandler
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
@@ -132,9 +133,6 @@ fun JwappScoreScreen(
     var unevaluatedCourses by remember { mutableStateOf<Set<String>>(emptySet()) }
     // 报表补充提示
     var reportHint by remember { mutableStateOf<String?>(null) }
-    // 培养方案匹配状态
-    var planHint by remember { mutableStateOf<String?>(null) }
-    var planHintIsError by remember { mutableStateOf(false) }
 
     fun loadScoreData() {
         isLoading = true
@@ -215,42 +213,19 @@ fun JwappScoreScreen(
                             android.util.Log.w("Score", "CjcxApi 失败(fallback JWAPP): ${e.message}")
                         }
 
-                        // 培养方案感知分类
-                        try {
-                            val pyfaApi = PyfaApi(jwxtLogin)
-                            val summary = pyfaApi.getPersonalPlan()
-                            val planCourses = pyfaApi.getPlanCourses(summary.pyfadm)
-                            val groupTree = pyfaApi.getCourseGroups(summary.pyfadm)
-
-                            val nodeMap = flattenGroupTree(groupTree)
-                            val planCourseByKch = planCourses.associateBy { it.kch }
-                            val planCourseNames = planCourses.map { CjcxApi.normalizeName(it.name) }.toSet()
-                            val openGroupNodes = nodeMap.values.filter {
-                                it.courseCount == 0 && it.children.isEmpty()
+                        // 课程号前缀分类（通核/通选）
+                        for (i in grades.indices) {
+                            val ts = grades[i]
+                            val classified = ts.scoreList.map { score ->
+                                val code = score.courseCode?.uppercase()
+                                val group = when {
+                                    code != null && code.startsWith("CORE") -> CourseGroup.GEN_CORE
+                                    code != null && code.startsWith("GNED") -> CourseGroup.GEN_ELECTIVE
+                                    else -> null
+                                }
+                                if (group != null) score.copy(courseGroup = group) else score
                             }
-
-                            val allScores = grades.flatMap { it.scoreList }
-                            val classified = classifyCoursesWithCaps(
-                                allScores, planCourseByKch, planCourseNames,
-                                nodeMap, openGroupNodes
-                            )
-                            // 回填分类结果
-                            var offset = 0
-                            for (i in grades.indices) {
-                                val ts = grades[i]
-                                val newList = classified.subList(offset, offset + ts.scoreList.size)
-                                grades[i] = ts.copy(scoreList = newList)
-                                offset += ts.scoreList.size
-                            }
-                            android.util.Log.d("Score", "分类完成: ${planCourseNames.size}门方案课, ${openGroupNodes.size}个开放组")
-                            // 设置培养方案匹配成功提示
-                            planHint = "已匹配「${summary.pyfamc}」"
-                            planHintIsError = false
-                        } catch (e: Exception) {
-                            android.util.Log.w("Score", "分类失败: ${e.message}")
-                            // 设置培养方案匹配失败提示
-                            planHint = "培养方案匹配失败: ${e.message ?: "未知错误"}"
-                            planHintIsError = true
+                            grades[i] = ts.copy(scoreList = classified)
                         }
                     }
 
@@ -496,50 +471,10 @@ fun JwappScoreScreen(
                         )
                     }
 
-                    // 培养方案匹配提示条（显示在成绩概览下方、分类绩点上方）
-                    if (planHint != null) {
+                    // GPA 筛选模式（非选课模式时显示）
+                    if (!gpaSelectMode && filteredScores.isNotEmpty()) {
                         item {
-                            top.yukonga.miuix.kmp.basic.Card(
-                                colors = top.yukonga.miuix.kmp.basic.CardDefaults.defaultColors(color = if (planHintIsError)
-                                        MiuixTheme.colorScheme.errorContainer
-                                    else
-                                        MiuixTheme.colorScheme.secondaryContainer
-                                ),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Icon(
-                                        if (planHintIsError) Icons.Default.Warning else Icons.Default.CheckCircle,
-                                        contentDescription = null,
-                                        tint = if (planHintIsError)
-                                            MiuixTheme.colorScheme.onErrorContainer
-                                        else
-                                            MiuixTheme.colorScheme.onSecondaryContainer,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Text(
-                                        planHint!!,
-                                        style = MiuixTheme.textStyles.footnote1,
-                                        color = if (planHintIsError)
-                                            MiuixTheme.colorScheme.onErrorContainer
-                                        else
-                                            MiuixTheme.colorScheme.onSecondaryContainer,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // 分类别 GPA 概览（非选课模式下显示）
-                    if (!gpaSelectMode && filteredScores.any { it.courseCategory != null }) {
-                        item {
-                            CategoryGpaBreakdown(
+                            GpaModeBreakdown(
                                 scores = filteredScores,
                                 calculateGpa = { api?.calculateGpaForCourses(it) },
                                 precision = gpaPrecision
@@ -598,8 +533,8 @@ fun JwappScoreScreen(
                                     onClick = { selectedGroups = emptySet() },
                                     label = "全部"
                                 )
-                                // 方案内类别 chips
-                                allCategories.filter { it != CourseGroup.OUT_OF_PLAN }.forEach { group ->
+                                // 通核/通选 chips
+                                allCategories.forEach { group ->
                                     val isSelected = group in selectedGroups
                                     AppFilterChip(
                                         selected = isSelected,
@@ -610,19 +545,6 @@ fun JwappScoreScreen(
                                                 selectedGroups + group
                                         },
                                         label = group.label
-                                    )
-                                }
-                                // "方案外" chip
-                                if (CourseGroup.OUT_OF_PLAN in allCategories) {
-                                    AppFilterChip(
-                                        selected = CourseGroup.OUT_OF_PLAN in selectedGroups,
-                                        onClick = {
-                                            selectedGroups = if (CourseGroup.OUT_OF_PLAN in selectedGroups)
-                                                (selectedGroups - CourseGroup.OUT_OF_PLAN).let { if (it.isEmpty()) emptySet() else it }
-                                            else
-                                                selectedGroups + CourseGroup.OUT_OF_PLAN
-                                        },
-                                        label = "方案外"
                                     )
                                 }
                             }
@@ -978,15 +900,12 @@ fun ScoreCard(
                     Spacer(Modifier.height(4.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("${scoreItem.coursePoint}学分", style = MiuixTheme.textStyles.footnote1, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                        // 课程分组 badge
+                        // 课程分组 badge（通核/通选）
                         val group = scoreItem.courseGroup
-                        if (group != null && group != CourseGroup.OUT_OF_PLAN) {
+                        if (group != null) {
                             val groupColor = when (group) {
-                                CourseGroup.CORE -> MiuixTheme.colorScheme.primary
                                 CourseGroup.GEN_CORE -> MiuixTheme.colorScheme.primaryVariant
                                 CourseGroup.GEN_ELECTIVE -> MiuixTheme.colorScheme.secondary
-                                CourseGroup.MAJOR_ELECTIVE -> MiuixTheme.colorScheme.error.copy(alpha = 0.8f)
-                                CourseGroup.OUT_OF_PLAN -> MiuixTheme.colorScheme.onSurfaceVariantSummary
                             }
                             Surface(
                                 shape = RoundedCornerShape(4.dp),
@@ -1127,6 +1046,7 @@ fun DetailChip(label: String, value: String) {
 
 @Composable
 fun GpaMappingDialog(show: MutableState<Boolean>) {
+    BackHandler(enabled = show.value) { show.value = false }
     SuperBottomSheet(
         show = show,
         title = "GPA 映射规则",
@@ -1218,26 +1138,34 @@ private fun ReportedGrade.toScoreItem(): ScoreItem = ScoreItem(
     source = ScoreSource.REPORT
 )
 
-/** 分类别 GPA 概览卡片 */
+/** 三种 GPA 模式概览卡片：全部 / 排除通选 / 排除所有通识 */
 @Composable
-fun CategoryGpaBreakdown(
+fun GpaModeBreakdown(
     scores: List<ScoreItem>,
     calculateGpa: (List<ScoreItem>) -> GpaInfo?,
     precision: Int = 2
 ) {
-    var expanded by remember { mutableStateOf(false) }
+    data class GpaMode(val label: String, val filter: (ScoreItem) -> Boolean)
 
-    // 按 CourseGroup 分组
-    val groupedGpa = remember(scores) {
-        scores.groupBy { it.courseGroup ?: CourseGroup.OUT_OF_PLAN }
-            .mapNotNull { (group, items) ->
-                val gpa = calculateGpa(items)
-                if (gpa != null) Triple(group, gpa, items.size) else null
-            }
-            .sortedBy { it.first.ordinal }
+    val modes = remember {
+        listOf(
+            GpaMode("所有课程") { true },
+            GpaMode("排除通识选修") { it.courseGroup != CourseGroup.GEN_ELECTIVE },
+            GpaMode("排除所有通识") { it.courseGroup != CourseGroup.GEN_CORE && it.courseGroup != CourseGroup.GEN_ELECTIVE }
+        )
     }
 
-    if (groupedGpa.isEmpty()) return
+    val results = remember(scores) {
+        modes.mapNotNull { mode ->
+            val filtered = scores.filter(mode.filter)
+            val gpa = if (filtered.isNotEmpty()) calculateGpa(filtered) else null
+            if (gpa != null) Triple(mode.label, gpa, filtered.size) else null
+        }
+    }
+
+    if (results.isEmpty()) return
+
+    var expanded by remember { mutableStateOf(false) }
 
     top.yukonga.miuix.kmp.basic.Card(
         modifier = Modifier.fillMaxWidth(),
@@ -1259,7 +1187,7 @@ fun CategoryGpaBreakdown(
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        "${groupedGpa.size} 个类别",
+                        "${results.size} 种统计",
                         style = MiuixTheme.textStyles.footnote1,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary
                     )
@@ -1272,7 +1200,7 @@ fun CategoryGpaBreakdown(
                 }
             }
 
-            // 默认收起时显示摘要行
+            // 收起时显示摘要行
             if (!expanded) {
                 Spacer(Modifier.height(8.dp))
                 @OptIn(ExperimentalLayoutApi::class)
@@ -1280,9 +1208,9 @@ fun CategoryGpaBreakdown(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    groupedGpa.forEach { (group, gpa, _) ->
+                    results.forEach { (label, gpa, _) ->
                         Text(
-                            "${group.shortLabel} %.${precision}f".format(gpa.gpa),
+                            "$label %.${precision}f".format(gpa.gpa),
                             style = MiuixTheme.textStyles.body2,
                             color = MiuixTheme.colorScheme.primary,
                             fontWeight = FontWeight.Medium
@@ -1300,16 +1228,16 @@ fun CategoryGpaBreakdown(
                 Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     // 表头
                     Row(Modifier.fillMaxWidth()) {
-                        Text("类别", style = MiuixTheme.textStyles.footnote1, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                        Text("统计范围", style = MiuixTheme.textStyles.footnote1, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                         Text("GPA", style = MiuixTheme.textStyles.footnote1, fontWeight = FontWeight.Bold, modifier = Modifier.width(56.dp), textAlign = TextAlign.End, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                         Text("均分", style = MiuixTheme.textStyles.footnote1, fontWeight = FontWeight.Bold, modifier = Modifier.width(56.dp), textAlign = TextAlign.End, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                         Text("学分", style = MiuixTheme.textStyles.footnote1, fontWeight = FontWeight.Bold, modifier = Modifier.width(48.dp), textAlign = TextAlign.End, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                         Text("门数", style = MiuixTheme.textStyles.footnote1, fontWeight = FontWeight.Bold, modifier = Modifier.width(36.dp), textAlign = TextAlign.End, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                     }
                     HorizontalDivider(color = MiuixTheme.colorScheme.outline)
-                    groupedGpa.forEach { (group, gpa, count) ->
+                    results.forEach { (label, gpa, count) ->
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Text(group.label, style = MiuixTheme.textStyles.footnote1, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                            Text(label, style = MiuixTheme.textStyles.footnote1, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                             Text("%.${precision}f".format(gpa.gpa), style = MiuixTheme.textStyles.footnote1, modifier = Modifier.width(56.dp), textAlign = TextAlign.End, fontWeight = FontWeight.Bold, color = MiuixTheme.colorScheme.primary)
                             Text(if (gpa.averageScore > 0) "%.${precision}f".format(gpa.averageScore) else "—", style = MiuixTheme.textStyles.footnote1, modifier = Modifier.width(56.dp), textAlign = TextAlign.End)
                             Text("%.1f".format(gpa.totalCredits), style = MiuixTheme.textStyles.footnote1, modifier = Modifier.width(48.dp), textAlign = TextAlign.End)
