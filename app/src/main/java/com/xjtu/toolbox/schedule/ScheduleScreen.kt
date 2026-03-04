@@ -143,6 +143,9 @@ fun ScheduleScreen(login: JwxtLogin? = null, studentId: String = "", onBack: () 
                         val termCode = cachedTerms.firstOrNull() ?: ""
                         selectedTermCode = termCode
                         currentTermCode = termCode
+                        if (termCode.isNotEmpty()) {
+                            try { dataCache.put("schedule_last_term", gson.toJson(termCode)) } catch (_: Exception) {}
+                        }
 
                         if (termCode.isNotEmpty()) {
                             val cached = dataCache.get("schedule_$termCode", Long.MAX_VALUE)  // 离线不限 TTL
@@ -195,6 +198,7 @@ fun ScheduleScreen(login: JwxtLogin? = null, studentId: String = "", onBack: () 
                     }
                     selectedTermCode = termCode
                     currentTermCode = termCode
+                    try { dataCache.put("schedule_last_term", gson.toJson(termCode)) } catch (_: Exception) {}
 
                     val cachedCourses = dataCache.get("schedule_$termCode")
                     var cachedCoursesSize = -1
@@ -444,6 +448,7 @@ fun ScheduleScreen(login: JwxtLogin? = null, studentId: String = "", onBack: () 
     fun switchTerm(newTermCode: String) {
         if (newTermCode == selectedTermCode) return
         selectedTermCode = newTermCode
+        try { dataCache.put("schedule_last_term", gson.toJson(newTermCode)) } catch (_: Exception) {}
         textbooksLoaded = false
         textbooks = emptyList()
         showingStaleData = false
