@@ -454,6 +454,35 @@ fun JwappScoreScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     contentPadding = PaddingValues(vertical = 8.dp)
                 ) {
+                    // 免责声明
+                    item {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            color = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.05f)
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.Info,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp),
+                                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.6f)
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    "仅供快速预览，不用于保研/奖学金等正式场景，不具有效力，不保证准确性",
+                                    style = MiuixTheme.textStyles.footnote1,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.6f),
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+
                     // GPA 卡片
                     item {
                         GpaCard(

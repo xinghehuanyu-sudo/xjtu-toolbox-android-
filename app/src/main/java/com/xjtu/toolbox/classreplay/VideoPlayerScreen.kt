@@ -66,7 +66,7 @@ enum class AudioSource(val label: String) {
 }
 
 // ════════════════════════════════════════
-//  入口
+//  入口 1 — CLASS 回放（从 activityId 加载）
 // ════════════════════════════════════════
 
 @OptIn(UnstableApi::class)
@@ -175,6 +175,68 @@ fun VideoPlayerScreen(
 }
 
 // ════════════════════════════════════════
+//  入口 2 — 通用（直接传入 URL，支持 HLS/MP4）
+// ════════════════════════════════════════
+
+/**
+ * 通用视频播放器入口，直接传入教师/屏幕 URL。
+ * 适用于 LMS 思源学堂直播（HLS m3u8）和录播。
+ *
+ * @param instructorUrl 教师画面 URL（可选）
+ * @param encoderUrl    电脑屏幕 URL（可选）
+ * @param title         视频标题
+ * @param headers       额外请求头（如 Origin / Referer）
+ * @param isLive        是否直播模式（隐藏进度条/快进快退）
+ * @param onBack        返回回调
+ */
+@OptIn(UnstableApi::class)
+@Composable
+fun DirectVideoPlayerScreen(
+    instructorUrl: String?,
+    encoderUrl: String?,
+    title: String,
+    headers: Map<String, String> = emptyMap(),
+    isLive: Boolean = false,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    val activity = context as? Activity
+
+    // 横屏
+    val prevOrientation = remember {
+        activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    }
+    LaunchedEffect(Unit) {
+        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+    }
+    DisposableEffect(Unit) {
+        onDispose { activity?.requestedOrientation = prevOrientation }
+    }
+
+    BackHandler { onBack() }
+
+    if (instructorUrl == null && encoderUrl == null) {
+        Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("没有可用的视频流", color = Color(0xFFEF5350), fontSize = 15.sp)
+                Spacer(Modifier.height(12.dp))
+                TextButton(text = "返回", onClick = onBack)
+            }
+        }
+        return
+    }
+
+    DualVideoPlayer(
+        instructorUrl = instructorUrl,
+        encoderUrl = encoderUrl,
+        title = title,
+        headers = headers,
+        isLive = isLive,
+        onBack = onBack
+    )
+}
+
+// ════════════════════════════════════════
 //  双源视频播放器核心
 // ════════════════════════════════════════
 
@@ -184,6 +246,8 @@ private fun DualVideoPlayer(
     instructorUrl: String?,
     encoderUrl: String?,
     title: String,
+    headers: Map<String, String> = emptyMap(),
+    isLive: Boolean = false,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -198,19 +262,52 @@ private fun DualVideoPlayer(
         onDispose {}
     }
 
+    // 构建带请求头的 MediaItem
+    fun buildMediaItem(url: String): MediaItem {
+        return if (headers.isNotEmpty()) {
+            MediaItem.Builder()
+                .setUri(url)
+                .setRequestMetadata(
+                    MediaItem.RequestMetadata.Builder().build()
+                )
+                .build()
+        } else {
+            MediaItem.fromUri(url)
+        }
+    }
+
+    // 构建带请求头的 DataSource.Factory
+    val dataSourceFactory = remember(headers) {
+        if (headers.isNotEmpty()) {
+            val httpFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+                .setDefaultRequestProperties(headers)
+            httpFactory
+        } else null
+    }
+
     // 播放器实例
     val instructorPlayer = remember {
         instructorUrl?.let { url ->
-            ExoPlayer.Builder(context).build().apply {
-                setMediaItem(MediaItem.fromUri(url))
+            val builder = ExoPlayer.Builder(context)
+            if (dataSourceFactory != null) {
+                val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
+                builder.setMediaSourceFactory(mediaSourceFactory)
+            }
+            builder.build().apply {
+                setMediaItem(buildMediaItem(url))
                 prepare()
             }
         }
     }
     val encoderPlayer = remember {
         encoderUrl?.let { url ->
-            ExoPlayer.Builder(context).build().apply {
-                setMediaItem(MediaItem.fromUri(url))
+            val builder = ExoPlayer.Builder(context)
+            if (dataSourceFactory != null) {
+                val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
+                builder.setMediaSourceFactory(mediaSourceFactory)
+            }
+            builder.build().apply {
+                setMediaItem(buildMediaItem(url))
                 prepare()
             }
         }
@@ -395,14 +492,16 @@ private fun DualVideoPlayer(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(24.dp)
                 ) {
-                    IconButton(onClick = {
-                        val newPos = (currentPosition - 10_000).coerceAtLeast(0)
-                        instructorPlayer?.seekTo(newPos)
-                        encoderPlayer?.seekTo(newPos)
-                        currentPosition = newPos
-                    }) {
-                        Icon(Icons.Default.Replay10, contentDescription = "快退10秒",
-                            tint = Color.White, modifier = Modifier.size(36.dp))
+                    if (!isLive) {
+                        IconButton(onClick = {
+                            val newPos = (currentPosition - 10_000).coerceAtLeast(0)
+                            instructorPlayer?.seekTo(newPos)
+                            encoderPlayer?.seekTo(newPos)
+                            currentPosition = newPos
+                        }) {
+                            Icon(Icons.Default.Replay10, contentDescription = "快退10秒",
+                                tint = Color.White, modifier = Modifier.size(36.dp))
+                        }
                     }
 
                     IconButton(
@@ -428,14 +527,16 @@ private fun DualVideoPlayer(
                         )
                     }
 
-                    IconButton(onClick = {
-                        val newPos = (currentPosition + 10_000).coerceAtMost(duration)
-                        instructorPlayer?.seekTo(newPos)
-                        encoderPlayer?.seekTo(newPos)
-                        currentPosition = newPos
-                    }) {
-                        Icon(Icons.Default.Forward10, contentDescription = "快进10秒",
-                            tint = Color.White, modifier = Modifier.size(36.dp))
+                    if (!isLive) {
+                        IconButton(onClick = {
+                            val newPos = (currentPosition + 10_000).coerceAtMost(duration)
+                            instructorPlayer?.seekTo(newPos)
+                            encoderPlayer?.seekTo(newPos)
+                            currentPosition = newPos
+                        }) {
+                            Icon(Icons.Default.Forward10, contentDescription = "快进10秒",
+                                tint = Color.White, modifier = Modifier.size(36.dp))
+                        }
                     }
                 }
 
@@ -447,27 +548,40 @@ private fun DualVideoPlayer(
                         .navigationBarsPadding()
                         .padding(horizontal = 16.dp, vertical = 8.dp)
                 ) {
-                    // 进度条
-                    Slider(
-                        value = if (duration > 0) currentPosition.toFloat() / duration else 0f,
-                        onValueChange = { fraction ->
-                            val newPos = (fraction * duration).toLong()
-                            instructorPlayer?.seekTo(newPos)
-                            encoderPlayer?.seekTo(newPos)
-                            currentPosition = newPos
-                        }
-                    )
+                    if (!isLive) {
+                        // 进度条（录播模式）
+                        Slider(
+                            value = if (duration > 0) currentPosition.toFloat() / duration else 0f,
+                            onValueChange = { fraction ->
+                                val newPos = (fraction * duration).toLong()
+                                instructorPlayer?.seekTo(newPos)
+                                encoderPlayer?.seekTo(newPos)
+                                currentPosition = newPos
+                            }
+                        )
+                    }
 
                     Row(
                         Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Text(
-                            "${formatTime(currentPosition)} / ${formatTime(duration)}",
-                            color = Color.White.copy(alpha = 0.9f),
-                            fontSize = 12.sp
-                        )
+                        if (isLive) {
+                            // 直播模式显示 LIVE 标记
+                            Box(
+                                Modifier
+                                    .background(Color(0xFFE53935), shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text("● LIVE", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        } else {
+                            Text(
+                                "${formatTime(currentPosition)} / ${formatTime(duration)}",
+                                color = Color.White.copy(alpha = 0.9f),
+                                fontSize = 12.sp
+                            )
+                        }
 
                         Spacer(Modifier.weight(1f))
 
@@ -489,14 +603,16 @@ private fun DualVideoPlayer(
                             )
                         }
 
-                        // 倍速
-                        TextButton(
-                            text = "${playbackSpeed}x",
-                            onClick = { showSpeedMenu = !showSpeedMenu; showSourceMenu = false },
-                            colors = top.yukonga.miuix.kmp.basic.ButtonDefaults.textButtonColors(
-                                color = Color.Transparent
+                        // 倍速（非直播模式）
+                        if (!isLive) {
+                            TextButton(
+                                text = "${playbackSpeed}x",
+                                onClick = { showSpeedMenu = !showSpeedMenu; showSourceMenu = false },
+                                colors = top.yukonga.miuix.kmp.basic.ButtonDefaults.textButtonColors(
+                                    color = Color.Transparent
+                                )
                             )
-                        )
+                        }
 
                         // 源切换
                         if (hasBoth) {

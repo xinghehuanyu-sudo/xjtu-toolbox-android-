@@ -49,6 +49,15 @@ private sealed class LmsPage {
     data object CourseList : LmsPage()
     data class ActivityList(val course: LmsCourseSummary) : LmsPage()
     data class ActivityDetail(val course: LmsCourseSummary, val activity: LmsActivity) : LmsPage()
+    /** 视频播放器页面（直播 HLS 或录播） */
+    data class VideoPlayer(
+        val title: String,
+        val instructorUrl: String?,
+        val encoderUrl: String?,
+        val isLive: Boolean,
+        val returnPage: LmsPage,
+        val headers: Map<String, String> = emptyMap()
+    ) : LmsPage()
 }
 
 // ════════════════════════════════════════
@@ -102,11 +111,26 @@ fun LmsScreen(login: LmsLogin, onBack: () -> Unit) {
 
     // 返回处理
     BackHandler(enabled = currentPage !is LmsPage.CourseList) {
-        currentPage = when (currentPage) {
-            is LmsPage.ActivityDetail -> LmsPage.ActivityList((currentPage as LmsPage.ActivityDetail).course)
+        currentPage = when (val cur = currentPage) {
+            is LmsPage.VideoPlayer -> cur.returnPage
+            is LmsPage.ActivityDetail -> LmsPage.ActivityList(cur.course)
             is LmsPage.ActivityList -> LmsPage.CourseList
             else -> LmsPage.CourseList
         }
+    }
+
+    // 视频播放器独立渲染（全屏，不参与 AnimatedContent）
+    val videoPage = currentPage as? LmsPage.VideoPlayer
+    if (videoPage != null) {
+        com.xjtu.toolbox.classreplay.DirectVideoPlayerScreen(
+            instructorUrl = videoPage.instructorUrl,
+            encoderUrl = videoPage.encoderUrl,
+            title = videoPage.title,
+            headers = videoPage.headers,
+            isLive = videoPage.isLive,
+            onBack = { currentPage = videoPage.returnPage }
+        )
+        return
     }
 
     AnimatedContent(
@@ -115,6 +139,7 @@ fun LmsScreen(login: LmsLogin, onBack: () -> Unit) {
             val forward = when {
                 targetState is LmsPage.ActivityList && initialState is LmsPage.CourseList -> true
                 targetState is LmsPage.ActivityDetail && initialState is LmsPage.ActivityList -> true
+                targetState is LmsPage.VideoPlayer -> true
                 else -> false
             }
             if (forward) {
@@ -141,9 +166,21 @@ fun LmsScreen(login: LmsLogin, onBack: () -> Unit) {
             )
             is LmsPage.ActivityDetail -> ActivityDetailPage(
                 api = api,
+                course = page.course,
                 activity = page.activity,
-                onBack = { currentPage = LmsPage.ActivityList(page.course) }
+                onBack = { currentPage = LmsPage.ActivityList(page.course) },
+                onPlayVideo = { title, instrUrl, encUrl, isLive, headers ->
+                    currentPage = LmsPage.VideoPlayer(
+                        title = title,
+                        instructorUrl = instrUrl,
+                        encoderUrl = encUrl,
+                        isLive = isLive,
+                        returnPage = LmsPage.ActivityDetail(page.course, page.activity),
+                        headers = headers
+                    )
+                }
             )
+            is LmsPage.VideoPlayer -> { /* handled above */ }
         }
     }
 }
@@ -446,8 +483,10 @@ private fun LmsActivityCard(activity: LmsActivity, onClick: () -> Unit) {
 @Composable
 private fun ActivityDetailPage(
     api: LmsApi,
+    course: LmsCourseSummary,
     activity: LmsActivity,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onPlayVideo: (title: String, instructorUrl: String?, encoderUrl: String?, isLive: Boolean, headers: Map<String, String>) -> Unit
 ) {
     val context = LocalContext.current
     var detail by remember { mutableStateOf<LmsActivity?>(null) }
@@ -531,18 +570,154 @@ private fun ActivityDetailPage(
                             }
                         }
 
-                        // 课堂回放
+                        // 课堂回放 (LESSON 类型)
                         if (d.type == LmsActivityType.LESSON && d.replayVideos.isNotEmpty()) {
                             item(key = "replay_header") { SectionHeader("课堂回放 (${d.replayVideos.size})") }
+
+                            // 多机位播放器入口按钮
+                            if (d.replayVideos.size >= 2) {
+                                item(key = "replay_play_btn") {
+                                    val instrVideo = d.replayVideos.find {
+                                        it.label.contains("instructor", true) || it.readableLabel == "教师画面"
+                                    }
+                                    val encVideo = d.replayVideos.find {
+                                        it.label.contains("encoder", true) || it.label.contains("screen", true)
+                                            || it.readableLabel == "电脑屏幕"
+                                    }
+                                    Button(
+                                        onClick = {
+                                            onPlayVideo(
+                                                d.title,
+                                                instrVideo?.downloadUrl,
+                                                encVideo?.downloadUrl ?: d.replayVideos.first().downloadUrl,
+                                                false,
+                                                emptyMap()
+                                            )
+                                        },
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                                    ) {
+                                        Icon(Icons.Default.PlayCircle, null, Modifier.size(18.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("多机位播放器")
+                                    }
+                                }
+                            }
+
                             items(d.replayVideos, key = { "replay_${it.id}" }) { video ->
-                                ReplayVideoCard(video, context)
+                                ReplayVideoCard(video, context) {
+                                    // 单机位播放
+                                    if (video.downloadUrl.isNotEmpty()) {
+                                        val isInstr = video.label.contains("instructor", true)
+                                        onPlayVideo(
+                                            "${d.title} - ${video.readableLabel}",
+                                            if (isInstr) video.downloadUrl else null,
+                                            if (!isInstr) video.downloadUrl else null,
+                                            false,
+                                            emptyMap()
+                                        )
+                                    }
+                                }
                             }
                         }
 
-                        // 直播链接
+                        // 直播/录播信息 (LECTURE_LIVE 类型)
                         if (d.type == LmsActivityType.LECTURE_LIVE) {
                             item(key = "live_header") { SectionHeader("直播信息") }
-                            item(key = "live_info") { LiveInfoCard(d, context) }
+                            item(key = "live_info") { LiveInfoCard(d) }
+
+                            // HLS 直播流 — 用视频播放器播放
+                            if (d.liveStreams.isNotEmpty()) {
+                                item(key = "live_play_btn") {
+                                    val instrStream = d.liveStreams.find { it.isInstructor }
+                                    val encStream = d.liveStreams.find { it.isEncoder }
+                                    val lmsHeaders = mapOf(
+                                        "Origin" to "https://lms.xjtu.edu.cn",
+                                        "Referer" to "https://lms.xjtu.edu.cn/"
+                                    )
+                                    Button(
+                                        onClick = {
+                                            onPlayVideo(
+                                                d.title,
+                                                instrStream?.src,
+                                                encStream?.src ?: d.liveStreams.first().src,
+                                                true,
+                                                lmsHeaders
+                                            )
+                                        },
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                                    ) {
+                                        Icon(Icons.Default.LiveTv, null, Modifier.size(18.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("多机位观看直播")
+                                    }
+                                }
+                                // 单独的流列表
+                                items(d.liveStreams, key = { "stream_${it.label}" }) { stream ->
+                                    LiveStreamCard(stream) {
+                                        val lmsHeaders = mapOf(
+                                            "Origin" to "https://lms.xjtu.edu.cn",
+                                            "Referer" to "https://lms.xjtu.edu.cn/"
+                                        )
+                                        onPlayVideo(
+                                            "${d.title} - ${stream.readableLabel}",
+                                            if (stream.isInstructor) stream.src else null,
+                                            if (!stream.isInstructor) stream.src else null,
+                                            true,
+                                            lmsHeaders
+                                        )
+                                    }
+                                }
+                            }
+
+                            // LECTURE_LIVE 录播回放
+                            if (d.liveReplayVideos.isNotEmpty()) {
+                                item(key = "live_replay_header") { SectionHeader("课堂录播 (${d.liveReplayVideos.size})") }
+
+                                if (d.liveReplayVideos.size >= 2) {
+                                    item(key = "live_replay_play_btn") {
+                                        val instrVideo = d.liveReplayVideos.find {
+                                            it.label.contains("instructor", true) || it.readableLabel == "教师画面"
+                                        }
+                                        val encVideo = d.liveReplayVideos.find {
+                                            it.label.contains("encoder", true) || it.label.contains("screen", true)
+                                                || it.readableLabel == "电脑屏幕"
+                                        }
+                                        Button(
+                                            onClick = {
+                                                onPlayVideo(
+                                                    d.title,
+                                                    instrVideo?.downloadUrl,
+                                                    encVideo?.downloadUrl ?: d.liveReplayVideos.first().downloadUrl,
+                                                    false,
+                                                    emptyMap()
+                                                )
+                                            },
+                                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                                        ) {
+                                            Icon(Icons.Default.PlayCircle, null, Modifier.size(18.dp))
+                                            Spacer(Modifier.width(6.dp))
+                                            Text("多机位播放器")
+                                        }
+                                    }
+                                }
+
+                                d.liveReplayVideos.forEachIndexed { idx, video ->
+                                    item(key = "live_replay_${idx}_${video.id}") {
+                                        ReplayVideoCard(video, context) {
+                                            if (video.downloadUrl.isNotEmpty()) {
+                                                val isInstr = video.label.contains("instructor", true)
+                                                onPlayVideo(
+                                                    "${d.title} - ${video.readableLabel}",
+                                                    if (isInstr) video.downloadUrl else null,
+                                                    if (!isInstr) video.downloadUrl else null,
+                                                    false,
+                                                    emptyMap()
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
 
                         item { Spacer(Modifier.height(16.dp)) }
@@ -707,13 +882,9 @@ private fun SubmissionCard(sub: LmsSubmissionItem, context: Context) {
 }
 
 @Composable
-private fun ReplayVideoCard(video: LmsReplayVideo, context: Context) {
+private fun ReplayVideoCard(video: LmsReplayVideo, context: Context, onPlay: () -> Unit) {
     Card(
-        onClick = {
-            if (video.downloadUrl.isNotEmpty()) {
-                try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(video.downloadUrl))) } catch (_: Exception) {}
-            }
-        },
+        onClick = onPlay,
         pressFeedbackType = PressFeedbackType.Sink,
         modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
     ) {
@@ -734,37 +905,100 @@ private fun ReplayVideoCard(video: LmsReplayVideo, context: Context) {
                     }
                 }
             }
-            if (video.downloadUrl.isNotEmpty()) {
-                Icon(Icons.Default.Download, null, tint = MiuixTheme.colorScheme.primary)
+            Icon(Icons.Default.PlayArrow, null, tint = MiuixTheme.colorScheme.primary)
+        }
+    }
+}
+
+/** HLS 直播流卡片 */
+@Composable
+private fun LiveStreamCard(stream: LmsLiveStream, onPlay: () -> Unit) {
+    Card(
+        onClick = onPlay,
+        pressFeedbackType = PressFeedbackType.Sink,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
+    ) {
+        Row(
+            Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                if (stream.isInstructor) Icons.Default.Videocam else Icons.Default.ScreenShare,
+                null, tint = Color(0xFFC62828), modifier = Modifier.size(32.dp)
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(stream.readableLabel, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("HLS 直播", fontSize = 12.sp, color = Color(0xFFC62828))
+                    if (stream.mute) {
+                        Text("静音", fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                    }
+                }
             }
+            Icon(Icons.Default.PlayArrow, null, tint = Color(0xFFC62828))
         }
     }
 }
 
 @Composable
-private fun LiveInfoCard(activity: LmsActivity, context: Context) {
+private fun LiveInfoCard(activity: LmsActivity) {
     Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Column(Modifier.padding(16.dp)) {
-            if (!activity.liveRoom.isNullOrBlank()) {
+            // 教室信息
+            if (!activity.liveRoomName.isNullOrBlank()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.MeetingRoom, null, Modifier.size(16.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                     Spacer(Modifier.width(6.dp))
-                    Text("直播间: ${activity.liveRoom}", fontSize = 14.sp)
+                    Text("教室: ${activity.liveRoomName}", fontSize = 14.sp)
                 }
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(6.dp))
             }
-            if (!activity.viewLive.isNullOrBlank()) {
-                Button(
-                    onClick = { try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(activity.viewLive))) } catch (_: Exception) {} },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("观看直播") }
-                Spacer(Modifier.height(8.dp))
+
+            // 教师
+            if (activity.liveInstructorNames.isNotEmpty()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Person, null, Modifier.size(16.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                    Spacer(Modifier.width(6.dp))
+                    Text("教师: ${activity.liveInstructorNames.joinToString(", ")}", fontSize = 14.sp)
+                }
+                Spacer(Modifier.height(6.dp))
             }
-            if (!activity.viewRecord.isNullOrBlank()) {
-                Button(
-                    onClick = { try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(activity.viewRecord))) } catch (_: Exception) {} },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("观看录像") }
+
+            // 直播状态
+            if (!activity.liveStatus.isNullOrBlank()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val isLive = activity.liveStatus == "live_in_progress"
+                    val statusColor = if (isLive) Color(0xFFC62828) else MiuixTheme.colorScheme.onSurfaceVariantSummary
+                    val statusText = when (activity.liveStatus) {
+                        "live_in_progress" -> "● 直播中"
+                        "live_ended" -> "已结束"
+                        "live_not_started" -> "未开始"
+                        else -> activity.liveStatus!!
+                    }
+                    Icon(Icons.Default.Circle, null, Modifier.size(10.dp), tint = statusColor)
+                    Spacer(Modifier.width(8.dp))
+                    Text(statusText, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = statusColor)
+                }
+                Spacer(Modifier.height(6.dp))
+            }
+
+            // 流信息摘要
+            if (activity.liveStreams.isNotEmpty()) {
+                Text(
+                    "${activity.liveStreams.size} 个视频流可用",
+                    fontSize = 13.sp,
+                    color = MiuixTheme.colorScheme.primary
+                )
+            }
+
+            // 录播摘要
+            if (activity.liveReplayVideos.isNotEmpty()) {
+                Text(
+                    "${activity.liveReplayVideos.size} 个录播视频可用",
+                    fontSize = 13.sp,
+                    color = MiuixTheme.colorScheme.primary
+                )
             }
         }
     }

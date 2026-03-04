@@ -1,4 +1,4 @@
-﻿package com.xjtu.toolbox
+package com.xjtu.toolbox
 
 import android.os.Bundle
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -154,6 +154,7 @@ object Routes {
     const val VENUE = "venue"
     const val CLASS_REPLAY = "class_replay"
     const val LMS = "lms"
+    const val SCHOOL_COURSE = "school_course"
     const val VIDEO_PLAYER = "video_player/{activityId}"
     const val BROWSER = "browser?url={url}"
 
@@ -1201,6 +1202,12 @@ fun AppNavigation(onReady: () -> Unit = {}) {
                 )
             } ?: LaunchedEffect(Unit) { navController.popBackStack() }
         }
+        composable(Routes.SCHOOL_COURSE) {
+            com.xjtu.toolbox.schedule.SchoolCourseScreen(
+                login = loginState.jwxtLogin,
+                onBack = { navController.popBackStack() }
+            )
+        }
         composable(
             Routes.VIDEO_PLAYER,
             arguments = listOf(navArgument("activityId") { type = NavType.IntType })
@@ -1444,7 +1451,7 @@ private fun MainScreen(navController: NavHostController, loginState: AppLoginSta
                                 when (tab) {
                                     BottomTab.HOME -> HomeTab(loginState, isRestoring = isRestoring, onNavigate = onNavigateWithNetCheck, onNavigateWithLogin = ::navigateWithLogin, onNavigateToProfile = { selectedTabOrdinal = BottomTab.PROFILE.ordinal }, scrollBehavior = homeScrollBehavior)
                                     BottomTab.ACADEMIC -> AcademicTab(loginState, ::navigateWithLogin, scrollBehavior = academicScrollBehavior)
-                                    BottomTab.TOOLS -> ToolsTab(onNavigateWithNetCheck, scrollBehavior = toolsScrollBehavior)
+                                    BottomTab.TOOLS -> ToolsTab(loginState, ::navigateWithLogin, onNavigateWithNetCheck, scrollBehavior = toolsScrollBehavior)
                                     BottomTab.PROFILE -> ProfileTab(loginState, ::navigateWithLogin, credentialStore, scrollBehavior = profileScrollBehavior)
                                 }
                             }
@@ -1920,7 +1927,7 @@ private fun HomeTab(
             val svcPink = androidx.compose.ui.graphics.Color(0xFFC2185B)
             val svcDeepPurple = androidx.compose.ui.graphics.Color(0xFF512DA8)
             svcRow(
-                { m -> HomeServiceCard(Icons.Default.CreditCard, "校园卡", "余额 · 账单", svcGreen, m) { onNavigateWithLogin(Routes.CAMPUS_CARD, LoginType.CAMPUS_CARD) } },
+                { m -> HomeServiceCard(Icons.Default.CreditCard, "校园卡", "账单 · 洞察", svcGreen, m) { onNavigateWithLogin(Routes.CAMPUS_CARD, LoginType.CAMPUS_CARD) } },
                 { m -> HomeServiceCard(Icons.Default.CalendarMonth, "课表考试", "课表 · 考试", svcIndigo, m) { onNavigateWithLogin(Routes.SCHEDULE, LoginType.JWXT) } }
             )
             svcRow(
@@ -1928,11 +1935,11 @@ private fun HomeTab(
                 { m -> HomeServiceCard(Icons.Default.QrCode, "付款码", "校园支付", svcTeal, m) { onNavigateWithLogin(Routes.PAYMENT_CODE, LoginType.JWXT) } }
             )
             svcRow(
-                { m -> HomeServiceCard(Icons.Default.DateRange, "考勤查询", "进出记录", svcBrown, m) { onNavigateWithLogin(Routes.ATTENDANCE, LoginType.ATTENDANCE) } },
+                { m -> HomeServiceCard(Icons.Default.DateRange, "考勤查询", "出勤记录", svcBrown, m) { onNavigateWithLogin(Routes.ATTENDANCE, LoginType.ATTENDANCE) } },
                 { m -> HomeServiceCard(Icons.Default.Description, "电子成绩单", "下载 · 签章", svcIndigo, m) { onNavigateWithLogin(Routes.TRANSCRIPT, LoginType.DZPZ) } }
             )
             svcRow(
-                { m -> HomeServiceCard(Icons.Default.RateReview, "本科评教", "自动评教", svcPink, m) { onNavigateWithLogin(Routes.JUDGE, LoginType.JWXT) } },
+                { m -> HomeServiceCard(Icons.Default.RateReview, "本科评教", "评教系统", svcPink, m) { onNavigateWithLogin(Routes.JUDGE, LoginType.JWXT) } },
                 { m -> HomeServiceCard(Icons.Default.Chair, "图书馆", "座位预约", svcOrange, m) { onNavigateWithLogin(Routes.LIBRARY, LoginType.LIBRARY) } }
             )
             svcRow(
@@ -1941,11 +1948,11 @@ private fun HomeTab(
             )
             svcRow(
                 { m -> HomeServiceCard(Icons.Default.Place, "场馆预订", "运动场地", svcCyan, m) { onNavigateWithLogin(Routes.VENUE, LoginType.VENUE) } },
-                { m -> HomeServiceCard(Icons.Default.OndemandVideo, "课程回放", "录播回看", svcDeepPurple, m) { onNavigateWithLogin(Routes.CLASS_REPLAY, LoginType.CLASS) } },
+                { m -> HomeServiceCard(Icons.Default.OndemandVideo, "课程回放", "Class录播", svcDeepPurple, m) { onNavigateWithLogin(Routes.CLASS_REPLAY, LoginType.CLASS) } },
             )
             svcRow(
-                { m -> HomeServiceCard(Icons.Default.MenuBook, "思源学堂", "课程 · 作业", svcIndigo, m) { onNavigateWithLogin(Routes.LMS, LoginType.LMS) } },
-                { m -> Spacer(m) }
+                { m -> HomeServiceCard(Icons.Default.School, "思源学堂", "课件 · 作业", svcIndigo, m) { onNavigateWithLogin(Routes.LMS, LoginType.LMS) } },
+                { m -> HomeServiceCard(Icons.Default.TravelExplore, "课表查询", "全校课程", svcCyan, m) { onNavigateWithLogin(Routes.SCHOOL_COURSE, LoginType.JWXT) } }
             )
         }
 
@@ -1982,19 +1989,15 @@ private fun AcademicTab(loginState: AppLoginState, onNavigateWithLogin: (String,
         SectionLabel("本科生")
         ServiceCard(Icons.Default.CalendarMonth, "课表 / 考试", "课表安排 · 考试时间 · 教材查询", loginState.jwxtLogin != null, iconColor = cIndigo) { onNavigateWithLogin(Routes.SCHEDULE, LoginType.JWXT) }
         ServiceCard(Icons.Default.Assessment, "成绩查询", "查看成绩 / GPA / 含报表补充", loginState.jwappLogin != null, iconColor = cPurple) { onNavigateWithLogin(Routes.JWAPP_SCORE, LoginType.JWAPP) }
-        ServiceCard(Icons.Default.DateRange, "考勤查询", "查看进出校园记录", loginState.attendanceLogin != null, iconColor = cBrown) { onNavigateWithLogin(Routes.ATTENDANCE, LoginType.ATTENDANCE) }
+        ServiceCard(Icons.Default.DateRange, "考勤查询", "查看课堂出勤情况", loginState.attendanceLogin != null, iconColor = cBrown) { onNavigateWithLogin(Routes.ATTENDANCE, LoginType.ATTENDANCE) }
         ServiceCard(Icons.Default.RateReview, "本科评教", "一键自动评教", loginState.jwxtLogin != null, iconColor = cPink) { onNavigateWithLogin(Routes.JUDGE, LoginType.JWXT) }
-
+        ServiceCard(Icons.Default.TravelExplore, "全校课表查询", "全校课程检索 · 地点 · 选课人数", loginState.jwxtLogin != null, iconColor = cCyan) { onNavigateWithLogin(Routes.SCHOOL_COURSE, LoginType.JWXT) }
 
         Spacer(Modifier.height(16.dp))
 
-        SectionLabel("校园生活")
-        ServiceCard(Icons.Default.CreditCard, "校园卡", "余额查询 / 消费账单 / 分析", loginState.campusCardLogin != null, iconColor = cGreen) { onNavigateWithLogin(Routes.CAMPUS_CARD, LoginType.CAMPUS_CARD) }
-        ServiceCard(Icons.Default.QrCode, "付款码", "校园支付 · 点击即用", loginState.getSharedClient() != null, iconColor = cTeal) { onNavigateWithLogin(Routes.PAYMENT_CODE, LoginType.JWXT) }
-        ServiceCard(Icons.Default.Chair, "图书馆座位", "查询 · 预约座位", loginState.libraryLogin != null, iconColor = cOrange) { onNavigateWithLogin(Routes.LIBRARY, LoginType.LIBRARY) }
-        ServiceCard(Icons.Default.Place, "场馆预订", "体育场馆 · 运动场地预订", loginState.venueLogin != null, iconColor = cCyan) { onNavigateWithLogin(Routes.VENUE, LoginType.VENUE) }
+        SectionLabel("课程学习")
         ServiceCard(Icons.Default.OndemandVideo, "课程回放", "课程录播 · 倍速回看", loginState.classLogin != null, iconColor = cDeepPurple) { onNavigateWithLogin(Routes.CLASS_REPLAY, LoginType.CLASS) }
-        ServiceCard(Icons.Default.MenuBook, "思源学堂", "课程 · 作业 · 课堂回放", loginState.lmsLogin != null, iconColor = cIndigo) { onNavigateWithLogin(Routes.LMS, LoginType.LMS) }
+        ServiceCard(Icons.Default.School, "思源学堂", "课件 · 作业 · 课堂回放", loginState.lmsLogin != null, iconColor = cIndigo) { onNavigateWithLogin(Routes.LMS, LoginType.LMS) }
 
         Spacer(Modifier.height(100.dp))
     }
@@ -2005,7 +2008,7 @@ private fun AcademicTab(loginState: AppLoginState, onNavigateWithLogin: (String,
 // ══════════════════════════════════════════
 
 @Composable
-private fun ToolsTab(onNavigate: (String) -> Unit, scrollBehavior: ScrollBehavior? = null) {
+private fun ToolsTab(loginState: AppLoginState, onNavigateWithLogin: (String, LoginType) -> Unit, onNavigate: (String) -> Unit, scrollBehavior: ScrollBehavior? = null) {
     Column(
         Modifier
             .fillMaxSize()
@@ -2015,6 +2018,19 @@ private fun ToolsTab(onNavigate: (String) -> Unit, scrollBehavior: ScrollBehavio
             .padding(horizontal = 16.dp)
     ) {
         Spacer(Modifier.height(12.dp))
+
+        val cGreen = androidx.compose.ui.graphics.Color(0xFF2E7D32)
+        val cTeal = androidx.compose.ui.graphics.Color(0xFF00796B)
+        val cOrange = androidx.compose.ui.graphics.Color(0xFFE65100)
+        val cCyan = androidx.compose.ui.graphics.Color(0xFF00838F)
+
+        SectionLabel("校园服务")
+        ServiceCard(Icons.Default.CreditCard, "校园卡", "余额查询 / 消费账单 / 分析", loginState.campusCardLogin != null, iconColor = cGreen) { onNavigateWithLogin(Routes.CAMPUS_CARD, LoginType.CAMPUS_CARD) }
+        ServiceCard(Icons.Default.QrCode, "付款码", "校园支付 · 点击即用", loginState.getSharedClient() != null, iconColor = cTeal) { onNavigateWithLogin(Routes.PAYMENT_CODE, LoginType.JWXT) }
+        ServiceCard(Icons.Default.Chair, "图书馆座位", "查询 · 预约座位", loginState.libraryLogin != null, iconColor = cOrange) { onNavigateWithLogin(Routes.LIBRARY, LoginType.LIBRARY) }
+        ServiceCard(Icons.Default.Place, "场馆预订", "体育场馆 · 运动场地预订", loginState.venueLogin != null, iconColor = cCyan) { onNavigateWithLogin(Routes.VENUE, LoginType.VENUE) }
+
+        Spacer(Modifier.height(16.dp))
 
         SectionLabel("校园查询")
         ServiceCard(Icons.Default.LocationOn, "空闲教室", "查询各校区各时段空闲教室 · 无需登录", false, iconColor = androidx.compose.ui.graphics.Color(0xFF7B1FA2)) { onNavigate(Routes.EMPTY_ROOM) }
@@ -2889,7 +2905,7 @@ private fun ProfileTab(loginState: AppLoginState, onNavigateWithLogin: (String, 
                             SuperDialog(
                                 show = showLogoutDialog,
                                 title = "确认退出",
-                                summary = "退出登录后需要重新输入凭据。确定要退出吗？",
+                                summary = "退出登录后大量功能将不可用，同时清除所有缓存。确定要退出吗？",
                                 onDismissRequest = { showLogoutDialog.value = false }
                             ) {
                                 Row(
@@ -2918,7 +2934,7 @@ private fun ProfileTab(loginState: AppLoginState, onNavigateWithLogin: (String, 
 
         Spacer(Modifier.height(24.dp))
 
-        // ── 关于区域（Card风格，整洁统一） ──
+        // ── 关于区域 ──
         val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
         var plansExpanded by remember { mutableStateOf(false) }
 
@@ -2928,7 +2944,7 @@ private fun ProfileTab(loginState: AppLoginState, onNavigateWithLogin: (String, 
                 .padding(horizontal = 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // 关于卡片
+            // ━━ 应用标识卡片 ━━
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 cornerRadius = 20.dp,
@@ -2937,7 +2953,13 @@ private fun ProfileTab(loginState: AppLoginState, onNavigateWithLogin: (String, 
                 Column {
                     // 应用信息行
                     Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = SinkFeedback()
+                            ) { uriHandler.openUri("https://www.runqinliu666.cn/") }
+                            .padding(horizontal = 20.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Surface(shape = CircleShape, color = androidx.compose.ui.graphics.Color(0xFF2E7D32).copy(alpha = 0.15f), modifier = Modifier.size(36.dp)) {
@@ -2947,66 +2969,13 @@ private fun ProfileTab(loginState: AppLoginState, onNavigateWithLogin: (String, 
                         }
                         Spacer(Modifier.width(14.dp))
                         Column(Modifier.weight(1f)) {
-                            Text("岱宗盒子", style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Medium)
-                            Text("by Yeliqin666", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                modifier = Modifier.clickable { uriHandler.openUri("https://www.runqinliu666.cn/") })
+                            Text("岱宗盒子", style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Bold)
+                            Text("by Yeliqin666 · 点击访问主页", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.primary.copy(alpha = 0.7f))
                         }
                         Surface(shape = RoundedCornerShape(6.dp), color = MiuixTheme.colorScheme.secondaryContainer) {
                             Text("v${BuildConfig.VERSION_NAME}", Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                                 style = MiuixTheme.textStyles.footnote1, color = MiuixTheme.colorScheme.onSecondaryContainer)
                         }
-                    }
-
-                    HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MiuixTheme.colorScheme.outline.copy(alpha = 0.3f))
-
-                    // GitHub 行
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = SinkFeedback()
-                            ) { uriHandler.openUri("https://github.com/yeliqin666/xjtu-toolbox-android") }
-                            .padding(horizontal = 20.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Surface(shape = CircleShape, color = androidx.compose.ui.graphics.Color(0xFF37474F).copy(alpha = 0.15f), modifier = Modifier.size(36.dp)) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.Code, null, Modifier.size(18.dp), tint = androidx.compose.ui.graphics.Color(0xFF37474F))
-                            }
-                        }
-                        Spacer(Modifier.width(14.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("源代码", style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Medium)
-                            Text("GitHub / yeliqin666", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                        }
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(18.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.5f))
-                    }
-
-                    HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MiuixTheme.colorScheme.outline.copy(alpha = 0.3f))
-
-                    // 致谢行
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = SinkFeedback()
-                            ) { uriHandler.openUri("https://github.com/yan-xiaoo/XJTUToolBox") }
-                            .padding(horizontal = 20.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Surface(shape = CircleShape, color = MiuixTheme.colorScheme.error.copy(alpha = 0.12f), modifier = Modifier.size(36.dp)) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.Favorite, null, Modifier.size(18.dp), tint = MiuixTheme.colorScheme.error)
-                            }
-                        }
-                        Spacer(Modifier.width(14.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("致谢", style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Medium)
-                            Text("XJTUToolBox by yan-xiaoo", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                        }
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(18.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.5f))
                     }
 
                     HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MiuixTheme.colorScheme.outline.copy(alpha = 0.3f))
@@ -3090,7 +3059,6 @@ private fun ProfileTab(loginState: AppLoginState, onNavigateWithLogin: (String, 
                                 }
                             )
                         }
-                        // 有新版本时显示下载按钮
                         if (latestDownloadUrl != null && updateCheckState != null && !updateCheckState!!.startsWith("error:") && updateCheckState != "latest" && updateCheckState != "checking") {
                             Button(
                                 onClick = { uriHandler.openUri(latestDownloadUrl!!) },
@@ -3106,52 +3074,145 @@ private fun ProfileTab(loginState: AppLoginState, onNavigateWithLogin: (String, 
                             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(18.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.5f))
                         }
                     }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // ━━ 开源社区卡片 ━━
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 20.dp,
+                colors = top.yukonga.miuix.kmp.basic.CardDefaults.defaultColors(color = MiuixTheme.colorScheme.surfaceVariant)
+            ) {
+                Column {
+                    // 源代码 — 引导参与
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = SinkFeedback()
+                            ) { uriHandler.openUri("https://github.com/yeliqin666/xjtu-toolbox-android") }
+                            .padding(horizontal = 20.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(shape = CircleShape, color = androidx.compose.ui.graphics.Color(0xFF37474F).copy(alpha = 0.15f), modifier = Modifier.size(36.dp)) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Code, null, Modifier.size(18.dp), tint = androidx.compose.ui.graphics.Color(0xFF37474F))
+                            }
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("源代码 · 开源透明", style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Medium)
+                            Text("GitHub 开源 · 欢迎 Star / Issue / PR", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                        }
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(18.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.5f))
+                    }
 
                     HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MiuixTheme.colorScheme.outline.copy(alpha = 0.3f))
 
-                    // 开发计划行（可展开）
-                    Column {
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = SinkFeedback()
-                                ) { plansExpanded = !plansExpanded }
-                                .padding(horizontal = 20.dp, vertical = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Surface(shape = CircleShape, color = MiuixTheme.colorScheme.primaryVariant.copy(alpha = 0.12f), modifier = Modifier.size(36.dp)) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Default.RocketLaunch, null, Modifier.size(18.dp), tint = MiuixTheme.colorScheme.primaryVariant)
-                                }
+                    // 反馈建议 — 引导提 Issue
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = SinkFeedback()
+                            ) { uriHandler.openUri("https://github.com/yeliqin666/xjtu-toolbox-android/issues") }
+                            .padding(horizontal = 20.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(shape = CircleShape, color = MiuixTheme.colorScheme.primary.copy(alpha = 0.12f), modifier = Modifier.size(36.dp)) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Feedback, null, Modifier.size(18.dp), tint = MiuixTheme.colorScheme.primary)
                             }
-                            Spacer(Modifier.width(14.dp))
-                            Text("开发计划", style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                            Icon(
-                                if (plansExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                null, Modifier.size(18.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.5f)
-                            )
                         }
-                        androidx.compose.animation.AnimatedVisibility(visible = plansExpanded) {
-                            Column(Modifier.padding(start = 20.dp, end = 20.dp, bottom = 14.dp)) {
-                                val plans = listOf(
-                                    "图书馆定时抢座",
-                                    "智能选课",
-                                    "通知聚合订阅 & Push",
-                                    "电子教材在线阅读",
-                                    "思源学堂解析版"
-                                )
-                                plans.forEachIndexed { idx, plan ->
-                                    Row(Modifier.padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        Surface(shape = CircleShape, color = MiuixTheme.colorScheme.primaryVariant.copy(alpha = 0.10f), modifier = Modifier.size(20.dp)) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                Text("${idx + 1}", style = MiuixTheme.textStyles.footnote1, color = MiuixTheme.colorScheme.primaryVariant, fontWeight = FontWeight.Bold)
-                                            }
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("反馈 · 建议 · 想法", style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Medium)
+                            Text("发现 Bug？有新点子？来 Issue 告诉我", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                        }
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(18.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.5f))
+                    }
+
+                    HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MiuixTheme.colorScheme.outline.copy(alpha = 0.3f))
+
+                    // 致谢行
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = SinkFeedback()
+                            ) { uriHandler.openUri("https://github.com/yan-xiaoo/XJTUToolBox") }
+                            .padding(horizontal = 20.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(shape = CircleShape, color = MiuixTheme.colorScheme.error.copy(alpha = 0.12f), modifier = Modifier.size(36.dp)) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Favorite, null, Modifier.size(18.dp), tint = MiuixTheme.colorScheme.error)
+                            }
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("致谢", style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Medium)
+                            Text("XJTUToolBox by yan-xiaoo", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                        }
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(18.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.5f))
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // ━━ 开发计划卡片 ━━
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 20.dp,
+                colors = top.yukonga.miuix.kmp.basic.CardDefaults.defaultColors(color = MiuixTheme.colorScheme.surfaceVariant)
+            ) {
+                Column {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = SinkFeedback()
+                            ) { plansExpanded = !plansExpanded }
+                            .padding(horizontal = 20.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(shape = CircleShape, color = MiuixTheme.colorScheme.primaryVariant.copy(alpha = 0.12f), modifier = Modifier.size(36.dp)) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.RocketLaunch, null, Modifier.size(18.dp), tint = MiuixTheme.colorScheme.primaryVariant)
+                            }
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Text("开发计划", style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                        Icon(
+                            if (plansExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            null, Modifier.size(18.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.5f)
+                        )
+                    }
+                    androidx.compose.animation.AnimatedVisibility(visible = plansExpanded) {
+                        Column(Modifier.padding(start = 20.dp, end = 20.dp, bottom = 14.dp)) {
+                            val plans = listOf(
+                                "图书馆座位推荐",
+                                "餐券领取 & 付款码优化",
+                                "智能选课助手",
+                                "通知聚合订阅 & Push",
+                                "电子教材在线阅读"
+                            )
+                            plans.forEachIndexed { idx, plan ->
+                                Row(Modifier.padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Surface(shape = CircleShape, color = MiuixTheme.colorScheme.primaryVariant.copy(alpha = 0.10f), modifier = Modifier.size(20.dp)) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text("${idx + 1}", style = MiuixTheme.textStyles.footnote1, color = MiuixTheme.colorScheme.primaryVariant, fontWeight = FontWeight.Bold)
                                         }
-                                        Spacer(Modifier.width(10.dp))
-                                        Text(plan, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                                     }
+                                    Spacer(Modifier.width(10.dp))
+                                    Text(plan, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                                 }
                             }
                         }
@@ -3494,6 +3555,17 @@ private val CHANGELOGS: Map<String, VersionChangelog> = mapOf(
             "🎬" to "课堂回放：支持多机位视频下载",
             "📎" to "课件附件：一键下载课程资料",
             "👍" to "UI 优化与多处细节改进"
+        )
+    ),
+    "2.7.0" to VersionChangelog(
+        items = listOf(
+            "🔍" to "新增全校课表查询：按课程名、教师、院系等多维度检索",
+            "🏠" to "首页/教务/工具 Tab 重新分区，更加合理",
+            "👤" to "\"我的\" 页大幅重构：全新关于区域、开源社区入口、开发计划",
+            "🎬" to "修复思源学堂视频播放闪退（横屏 Activity 重建问题）",
+            "📊" to "成绩查询页新增免责声明提示",
+            "🐛" to "修复全校课表 API 解析异常导致的闪退",
+            "👍" to "出勤记录文案修正、多处 UI 细节优化"
         )
     )
 )

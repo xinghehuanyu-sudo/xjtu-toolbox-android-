@@ -480,11 +480,82 @@ class LmsApi(private val login: LmsLogin) {
 
             LmsActivityType.LECTURE_LIVE -> {
                 val external = dataObj?.get("external_live_detail").safeObject()
+
+                // 解析教室信息（room 是 JSON 对象）
+                val roomObj = external?.get("room").safeObject()
+                val roomName = roomObj?.get("room_name").safeString()
+                val roomCode = roomObj?.get("room_code").safeString()
+
+                // 解析教师名单
+                val instructorNames = external?.get("instructor_names").safeArray()
+                    ?.mapNotNull { it.safeString() } ?: emptyList()
+
+                // 解析 HLS 直播流（多机位）
+                val streams = external?.get("streams").safeArray()?.mapNotNull { elem ->
+                    try {
+                        val s = elem.asJsonObject
+                        LmsLiveStream(
+                            label = s.get("label").safeString() ?: "",
+                            src = s.get("src").safeString()
+                                ?: s.get("stream_url").safeString() ?: "",
+                            mute = s.get("mute").safeBoolean() || s.get("muted").safeBoolean(),
+                            type = s.get("type").safeString() ?: "application/x-mpegURL"
+                        )
+                    } catch (e: Exception) {
+                        Log.w(TAG, "extractActivityDetail: skip bad stream", e)
+                        null
+                    }
+                }?.filter { it.src.isNotEmpty() } ?: emptyList()
+
+                // 解析录播回放视频
+                val replayVideosArr = external?.get("replay_videos").safeArray()
+                val liveReplayVideos = replayVideosArr?.mapNotNull { elem ->
+                    try {
+                        val v = elem.asJsonObject
+                        LmsReplayVideo(
+                            id = v.get("id").safeInt(),
+                            label = v.get("label").safeString()
+                                ?: v.get("camera_type").safeString() ?: "",
+                            mute = v.get("mute").safeBoolean(),
+                            isBestAudio = v.get("is_best_audio").safeBoolean(),
+                            playType = v.get("play_type").safeString() ?: "",
+                            downloadUrl = v.get("download_url").safeString()
+                                ?: v.get("url").safeString() ?: "",
+                            fileKey = v.get("file_key").safeString() ?: "",
+                            size = v.get("size").safeInt()
+                        )
+                    } catch (e: Exception) {
+                        Log.w(TAG, "extractActivityDetail: skip bad live replay video", e)
+                        null
+                    }
+                } ?: emptyList()
+
+                // 如果有 replay_id 且 replay_videos 为空，尝试通过 RMS 获取回放
+                val replayId = external?.get("replay_id")?.let {
+                    if (it.isJsonNull) null
+                    else it.safeString()?.takeIf { s -> s.isNotEmpty() }
+                        ?: it.safeInt().takeIf { i -> i > 0 }?.toString()
+                }
+                val finalReplayVideos = if (liveReplayVideos.isEmpty() && replayId != null) {
+                    try {
+                        getReplayVideos(replayId, common.id)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "extractActivityDetail: failed to get RMS replay videos for LECTURE_LIVE", e)
+                        emptyList()
+                    }
+                } else liveReplayVideos
+
                 common.copy(
-                    replayCode = external?.get("replay_id").safeString(),
-                    liveRoom = external?.get("room").safeString(),
-                    viewLive = external?.get("view_live").safeString(),
-                    viewRecord = external?.get("view_record").safeString()
+                    replayCode = replayId,
+                    liveRoomName = roomName,
+                    liveRoomCode = roomCode,
+                    liveStatus = external?.get("status").safeString(),
+                    liveInstructorNames = instructorNames,
+                    liveStreams = streams,
+                    liveReplayVideos = finalReplayVideos,
+                    externalLiveId = external?.get("id").safeInt(),
+                    viewLive = external?.get("view_live").safeBoolean(),
+                    viewRecord = external?.get("view_record").safeBoolean()
                 )
             }
 

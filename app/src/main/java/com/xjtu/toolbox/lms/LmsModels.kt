@@ -168,9 +168,15 @@ data class LmsActivity(
     val lessonEnd: String? = null,
 
     // lecture_live 专有
-    val liveRoom: String? = null,
-    val viewLive: String? = null,
-    val viewRecord: String? = null
+    val liveRoomName: String? = null,
+    val liveRoomCode: String? = null,
+    val liveStatus: String? = null,
+    val liveInstructorNames: List<String> = emptyList(),
+    val liveStreams: List<LmsLiveStream> = emptyList(),
+    val liveReplayVideos: List<LmsReplayVideo> = emptyList(),
+    val externalLiveId: Int? = null,
+    val viewLive: Boolean = false,
+    val viewRecord: Boolean = false
 )
 
 // ════════════════════════════════════════
@@ -239,6 +245,30 @@ data class LmsSubmissionListResponse(
     val list: List<LmsSubmissionItem> = emptyList(),
     val uploads: List<LmsUpload> = emptyList()
 )
+
+// ════════════════════════════════════════
+//  直播流
+// ════════════════════════════════════════
+
+/** HLS 直播流（多机位） */
+data class LmsLiveStream(
+    val label: String = "",
+    val src: String = "",
+    val mute: Boolean = false,
+    val type: String = "application/x-mpegURL"
+) {
+    /** 用户友好的标签 */
+    val readableLabel: String
+        get() = when {
+            label.contains("instructor", ignoreCase = true) -> "教师画面"
+            label.contains("encoder", ignoreCase = true) || label.contains("screen", ignoreCase = true) -> "电脑屏幕"
+            label.isNotEmpty() -> label
+            else -> "视频流"
+        }
+
+    val isInstructor: Boolean get() = label.contains("instructor", ignoreCase = true)
+    val isEncoder: Boolean get() = label.contains("encoder", ignoreCase = true) || label.contains("screen", ignoreCase = true)
+}
 
 // ════════════════════════════════════════
 //  回放视频
