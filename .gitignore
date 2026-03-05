@@ -14,3 +14,19 @@ local.properties
 release.jks
 release.jks.b64
 .kotlin/
+# Gradle
+.gradle/
+build/
+
+# APK
+*.apk
+*.ap_
+*.aab
+# Dex metadata
+*.dm
+# Generated files
+output.json
+output-metadata.json
+
+# Local config
+local.properties

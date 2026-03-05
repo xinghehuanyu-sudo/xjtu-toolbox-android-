@@ -55,6 +55,11 @@
                 android:resource="@xml/schedule_widget_4x2_info" />
         </receiver>
 
+        <service
+            android:name=".widget.ScheduleWidgetRemoteViewsService"
+            android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
+
         <!-- 导出文件分享 FileProvider -->
         <provider
             android:name="androidx.core.content.FileProvider"

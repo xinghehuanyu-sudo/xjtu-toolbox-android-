@@ -6,6 +6,7 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.widget.RemoteViews
 import com.google.gson.Gson
 import com.xjtu.toolbox.MainActivity
@@ -23,14 +24,14 @@ import kotlinx.coroutines.runBlocking
 
 enum class WidgetSize { SMALL, LARGE }
 
-private data class WidgetCourse(
+internal data class WidgetCourse(
     val name: String,
     val location: String,
     val startSection: Int,
     val endSection: Int
 )
 
-private data class WidgetScheduleData(
+internal data class WidgetScheduleData(
     val weekText: String,
     val dayText: String,
     val statusText: String,
@@ -41,6 +42,7 @@ private data class WidgetScheduleData(
 
 object ScheduleWidgetUpdater {
     const val ACTION_REFRESH = "com.xjtu.toolbox.widget.ACTION_REFRESH_SCHEDULE_WIDGET"
+    const val EXTRA_RESET_TO_TODAY = "com.xjtu.toolbox.widget.EXTRA_RESET_TO_TODAY"
     const val ACTION_WEEK_PREV = "com.xjtu.toolbox.widget.ACTION_SCHEDULE_WIDGET_WEEK_PREV"
     const val ACTION_WEEK_NEXT = "com.xjtu.toolbox.widget.ACTION_SCHEDULE_WIDGET_WEEK_NEXT"
     const val ACTION_DAY_PREV = "com.xjtu.toolbox.widget.ACTION_SCHEDULE_WIDGET_DAY_PREV"
@@ -53,12 +55,18 @@ object ScheduleWidgetUpdater {
 
     private val gson = Gson()
 
-    fun requestUpdate(context: Context) {
+    fun requestUpdate(context: Context, resetToToday: Boolean = true) {
         context.sendBroadcast(
-            Intent(context, ScheduleWidget2x2Provider::class.java).apply { action = ACTION_REFRESH }
+            Intent(context, ScheduleWidget2x2Provider::class.java).apply {
+                action = ACTION_REFRESH
+                putExtra(EXTRA_RESET_TO_TODAY, resetToToday)
+            }
         )
         context.sendBroadcast(
-            Intent(context, ScheduleWidget4x2Provider::class.java).apply { action = ACTION_REFRESH }
+            Intent(context, ScheduleWidget4x2Provider::class.java).apply {
+                action = ACTION_REFRESH
+                putExtra(EXTRA_RESET_TO_TODAY, resetToToday)
+            }
         )
     }
 
@@ -67,29 +75,38 @@ object ScheduleWidgetUpdater {
         when (action) {
             ACTION_WEEK_PREV -> {
                 adjustWeekOffset(context, -1)
-                requestUpdate(context)
+                requestUpdate(context, resetToToday = false)
                 return true
             }
 
             ACTION_WEEK_NEXT -> {
                 adjustWeekOffset(context, 1)
-                requestUpdate(context)
+                requestUpdate(context, resetToToday = false)
                 return true
             }
 
             ACTION_DAY_PREV -> {
                 adjustSelectedDayOfWeek(context, -1, todayDow)
-                requestUpdate(context)
+                requestUpdate(context, resetToToday = false)
                 return true
             }
 
             ACTION_DAY_NEXT -> {
                 adjustSelectedDayOfWeek(context, 1, todayDow)
-                requestUpdate(context)
+                requestUpdate(context, resetToToday = false)
                 return true
             }
         }
         return false
+    }
+
+    internal fun resetBrowseSelectionToToday(context: Context) {
+        val todayDow = LocalDate.now().dayOfWeek.value
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putInt(KEY_WEEK_OFFSET, 0)
+            .putInt(KEY_DAY_OF_WEEK, todayDow)
+            .apply()
     }
 
     fun updateSpecific(
@@ -99,14 +116,15 @@ object ScheduleWidgetUpdater {
         size: WidgetSize
     ) {
         if (appWidgetIds.isEmpty()) return
-        val data = loadTodaySchedule(context)
+        val data = loadScheduleData(context)
         appWidgetIds.forEach { widgetId ->
             val views = when (size) {
-                WidgetSize.SMALL -> buildSmallViews(context, data)
-                WidgetSize.LARGE -> buildLargeViews(context, data)
+                WidgetSize.SMALL -> buildSmallViews(context, data, widgetId)
+                WidgetSize.LARGE -> buildLargeViews(context, data, widgetId)
             }
             appWidgetManager.updateAppWidget(widgetId, views)
         }
+        appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetIds, R.id.widget_course_list)
     }
 
     private fun buildLaunchPendingIntent(context: Context, requestCode: Int): PendingIntent {
@@ -137,7 +155,15 @@ object ScheduleWidgetUpdater {
         )
     }
 
-    private fun buildSmallViews(context: Context, data: WidgetScheduleData): RemoteViews {
+    private fun buildCourseListAdapterIntent(context: Context, appWidgetId: Int, size: WidgetSize): Intent {
+        return Intent(context, ScheduleWidgetRemoteViewsService::class.java).apply {
+            putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+            putExtra("widget_size", size.name)
+            data = Uri.parse(toUri(Intent.URI_INTENT_SCHEME))
+        }
+    }
+
+    private fun buildSmallViews(context: Context, data: WidgetScheduleData, appWidgetId: Int): RemoteViews {
         val views = RemoteViews(context.packageName, R.layout.widget_schedule_2x2)
         views.setTextViewText(R.id.widget_title, "课表")
         views.setTextViewText(R.id.widget_week, data.weekText)
@@ -161,32 +187,33 @@ object ScheduleWidgetUpdater {
             R.id.widget_day_next,
             buildWeekActionPendingIntent(context, 1104, ACTION_DAY_NEXT, ScheduleWidget2x2Provider::class.java)
         )
+        views.setRemoteAdapter(
+            R.id.widget_course_list,
+            buildCourseListAdapterIntent(context, appWidgetId, WidgetSize.SMALL)
+        )
+        views.setEmptyView(R.id.widget_course_list, R.id.widget_empty)
+        views.setPendingIntentTemplate(
+            R.id.widget_course_list,
+            buildLaunchPendingIntent(context, 3000 + appWidgetId)
+        )
 
         if (!data.hasCache) {
             views.setViewVisibility(R.id.widget_empty, android.view.View.VISIBLE)
             views.setTextViewText(R.id.widget_empty, "暂无课表缓存\n请先打开课表页同步")
-            hideSmallRows(views)
             return views
         }
 
         if (data.courses.isEmpty()) {
             views.setViewVisibility(R.id.widget_empty, android.view.View.VISIBLE)
             views.setTextViewText(R.id.widget_empty, "所选日期无课程")
-            hideSmallRows(views)
             return views
         }
 
         views.setViewVisibility(R.id.widget_empty, android.view.View.GONE)
-        bindSmallRow(views, 0, data.courses.getOrNull(0))
-        bindSmallRow(views, 1, data.courses.getOrNull(1))
-        val hiddenCount = (data.courses.size - 2).coerceAtLeast(0)
-        if (hiddenCount > 0) {
-            views.setTextViewText(R.id.widget_status, "今日共${data.courses.size}节，另有${hiddenCount}节")
-        }
         return views
     }
 
-    private fun buildLargeViews(context: Context, data: WidgetScheduleData): RemoteViews {
+    private fun buildLargeViews(context: Context, data: WidgetScheduleData, appWidgetId: Int): RemoteViews {
         val views = RemoteViews(context.packageName, R.layout.widget_schedule_4x2)
         views.setTextViewText(R.id.widget_title, "课表")
         views.setTextViewText(R.id.widget_week, data.weekText)
@@ -210,124 +237,33 @@ object ScheduleWidgetUpdater {
             R.id.widget_day_next,
             buildWeekActionPendingIntent(context, 1204, ACTION_DAY_NEXT, ScheduleWidget4x2Provider::class.java)
         )
+        views.setRemoteAdapter(
+            R.id.widget_course_list,
+            buildCourseListAdapterIntent(context, appWidgetId, WidgetSize.LARGE)
+        )
+        views.setEmptyView(R.id.widget_course_list, R.id.widget_empty)
+        views.setPendingIntentTemplate(
+            R.id.widget_course_list,
+            buildLaunchPendingIntent(context, 4000 + appWidgetId)
+        )
 
         if (!data.hasCache) {
             views.setViewVisibility(R.id.widget_empty, android.view.View.VISIBLE)
             views.setTextViewText(R.id.widget_empty, "暂无课表缓存，请先打开课表页同步")
-            hideLargeRows(views)
             return views
         }
 
         if (data.courses.isEmpty()) {
             views.setViewVisibility(R.id.widget_empty, android.view.View.VISIBLE)
             views.setTextViewText(R.id.widget_empty, "所选日期无课程")
-            hideLargeRows(views)
             return views
         }
 
         views.setViewVisibility(R.id.widget_empty, android.view.View.GONE)
-        bindLargeRow(views, 0, data.courses.getOrNull(0))
-        bindLargeRow(views, 1, data.courses.getOrNull(1))
-        bindLargeRow(views, 2, data.courses.getOrNull(2))
-        bindLargeRow(views, 3, data.courses.getOrNull(3))
-        bindLargeRow(views, 4, data.courses.getOrNull(4))
-        val hiddenCount = (data.courses.size - 5).coerceAtLeast(0)
-        if (hiddenCount > 0) {
-            views.setTextViewText(R.id.widget_status, "今日共${data.courses.size}节，另有${hiddenCount}节")
-        }
         return views
     }
 
-    private fun hideSmallRows(views: RemoteViews) {
-        views.setViewVisibility(R.id.row_course_1, android.view.View.GONE)
-        views.setViewVisibility(R.id.row_course_2, android.view.View.GONE)
-    }
-
-    private fun bindSmallRow(views: RemoteViews, index: Int, course: WidgetCourse?) {
-        val rowId = when (index) {
-            0 -> R.id.row_course_1
-            else -> R.id.row_course_2
-        }
-        val timeId = when (index) {
-            0 -> R.id.widget_time_1
-            else -> R.id.widget_time_2
-        }
-        val nameId = when (index) {
-            0 -> R.id.widget_name_1
-            else -> R.id.widget_name_2
-        }
-        val locId = when (index) {
-            0 -> R.id.widget_location_1
-            else -> R.id.widget_location_2
-        }
-
-        if (course == null) {
-            views.setViewVisibility(rowId, android.view.View.GONE)
-            return
-        }
-
-        views.setViewVisibility(rowId, android.view.View.VISIBLE)
-        views.setTextViewText(
-            timeId,
-            "${XjtuTime.getClassStartStr(course.startSection)}-${XjtuTime.getClassEndStr(course.endSection)}"
-        )
-        views.setTextViewText(nameId, course.name)
-        views.setTextViewText(locId, course.location.ifBlank { "地点待定" })
-    }
-
-    private fun hideLargeRows(views: RemoteViews) {
-        views.setViewVisibility(R.id.row_course_1, android.view.View.GONE)
-        views.setViewVisibility(R.id.row_course_2, android.view.View.GONE)
-        views.setViewVisibility(R.id.row_course_3, android.view.View.GONE)
-        views.setViewVisibility(R.id.row_course_4, android.view.View.GONE)
-        views.setViewVisibility(R.id.row_course_5, android.view.View.GONE)
-    }
-
-    private fun bindLargeRow(views: RemoteViews, index: Int, course: WidgetCourse?) {
-        val rowId = when (index) {
-            0 -> R.id.row_course_1
-            1 -> R.id.row_course_2
-            2 -> R.id.row_course_3
-            3 -> R.id.row_course_4
-            else -> R.id.row_course_5
-        }
-        val timeId = when (index) {
-            0 -> R.id.widget_time_1
-            1 -> R.id.widget_time_2
-            2 -> R.id.widget_time_3
-            3 -> R.id.widget_time_4
-            else -> R.id.widget_time_5
-        }
-        val nameId = when (index) {
-            0 -> R.id.widget_name_1
-            1 -> R.id.widget_name_2
-            2 -> R.id.widget_name_3
-            3 -> R.id.widget_name_4
-            else -> R.id.widget_name_5
-        }
-        val locId = when (index) {
-            0 -> R.id.widget_location_1
-            1 -> R.id.widget_location_2
-            2 -> R.id.widget_location_3
-            3 -> R.id.widget_location_4
-            else -> R.id.widget_location_5
-        }
-
-        if (course == null) {
-            views.setViewVisibility(rowId, android.view.View.GONE)
-            return
-        }
-
-        views.setViewVisibility(rowId, android.view.View.VISIBLE)
-        views.setTextViewText(
-            timeId,
-            "${XjtuTime.getClassStartStr(course.startSection)}-${XjtuTime.getClassEndStr(course.endSection)}"
-        )
-        views.setTextViewText(nameId, course.name)
-        views.setTextViewText(locId, course.location.ifBlank { "地点待定" })
-    }
-
-    private fun loadTodaySchedule(context: Context): WidgetScheduleData {
+    internal fun loadScheduleData(context: Context): WidgetScheduleData {
         val now = LocalTime.now()
         val nowDate = LocalDate.now()
         val todayDow = nowDate.dayOfWeek.value
@@ -572,6 +508,9 @@ class ScheduleWidget2x2Provider : AppWidgetProvider() {
         super.onReceive(context, intent)
         if (ScheduleWidgetUpdater.handleWeekAction(context, intent?.action)) return
         if (intent?.action == ScheduleWidgetUpdater.ACTION_REFRESH) {
+            if (intent.getBooleanExtra(ScheduleWidgetUpdater.EXTRA_RESET_TO_TODAY, false)) {
+                ScheduleWidgetUpdater.resetBrowseSelectionToToday(context)
+            }
             val manager = AppWidgetManager.getInstance(context)
             val ids = manager.getAppWidgetIds(ComponentName(context, ScheduleWidget2x2Provider::class.java))
             ScheduleWidgetUpdater.updateSpecific(context, manager, ids, WidgetSize.SMALL)
@@ -588,6 +527,9 @@ class ScheduleWidget4x2Provider : AppWidgetProvider() {
         super.onReceive(context, intent)
         if (ScheduleWidgetUpdater.handleWeekAction(context, intent?.action)) return
         if (intent?.action == ScheduleWidgetUpdater.ACTION_REFRESH) {
+            if (intent.getBooleanExtra(ScheduleWidgetUpdater.EXTRA_RESET_TO_TODAY, false)) {
+                ScheduleWidgetUpdater.resetBrowseSelectionToToday(context)
+            }
             val manager = AppWidgetManager.getInstance(context)
             val ids = manager.getAppWidgetIds(ComponentName(context, ScheduleWidget4x2Provider::class.java))
             ScheduleWidgetUpdater.updateSpecific(context, manager, ids, WidgetSize.LARGE)
