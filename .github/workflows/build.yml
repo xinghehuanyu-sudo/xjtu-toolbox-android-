@@ -88,16 +88,20 @@ jobs:
           REPO="xjtu-toolbox-android"
           APK_PATH="app/build/outputs/apk/release/app-release.apk"
 
+          # 推送 tag 到 Gitee（确保 tag 存在）
+          git remote add gitee "https://yeliqin666:${GITEE_TOKEN}@gitee.com/${OWNER}/${REPO}.git" 2>/dev/null || true
+          git push gitee "${TAG}" --force || echo "Tag push may have already existed"
+
           # 删除已有的同名 release
           OLD_ID=$(curl -sf "https://gitee.com/api/v5/repos/${OWNER}/${REPO}/releases/tags/${TAG}?access_token=${GITEE_TOKEN}" \
             | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id',''))" 2>/dev/null || echo "")
           if [ -n "$OLD_ID" ] && [ "$OLD_ID" != "None" ] && [ "$OLD_ID" != "" ]; then
-            curl -sf -X DELETE "https://gitee.com/api/v5/repos/${OWNER}/${REPO}/releases/${OLD_ID}?access_token=${GITEE_TOKEN}" || true
+            curl -s -X DELETE "https://gitee.com/api/v5/repos/${OWNER}/${REPO}/releases/${OLD_ID}?access_token=${GITEE_TOKEN}" || true
             echo "Deleted old Gitee release $OLD_ID"
           fi
 
           # 创建新 release
-          RELEASE=$(curl -sf -X POST "https://gitee.com/api/v5/repos/${OWNER}/${REPO}/releases" \
+          RELEASE=$(curl -s -X POST "https://gitee.com/api/v5/repos/${OWNER}/${REPO}/releases" \
             -H "Content-Type: application/json" \
             -d "{
               \"access_token\": \"${GITEE_TOKEN}\",
@@ -106,11 +110,12 @@ jobs:
               \"body\": \"同步自 GitHub Release ${TAG}\",
               \"prerelease\": false
             }")
+          echo "Create response: $RELEASE"
           RELEASE_ID=$(echo "$RELEASE" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
           echo "Created Gitee release $RELEASE_ID"
 
           # 上传 APK
-          curl -sf -X POST "https://gitee.com/api/v5/repos/${OWNER}/${REPO}/releases/${RELEASE_ID}/attach_files" \
+          curl -s -X POST "https://gitee.com/api/v5/repos/${OWNER}/${REPO}/releases/${RELEASE_ID}/attach_files" \
             -F "access_token=${GITEE_TOKEN}" \
             -F "file=@${APK_PATH}" \
             && echo "APK uploaded to Gitee release"
