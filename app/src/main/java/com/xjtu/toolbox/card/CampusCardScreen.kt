@@ -90,6 +90,7 @@ fun CampusCardScreen(
     var monthlyStats by remember { mutableStateOf<List<MonthlyStats>>(emptyList()) }
     var categorySpending by remember { mutableStateOf<Map<String, Double>>(emptyMap()) }
     var mealTimeStats by remember { mutableStateOf<Map<String, MealTimeStats>>(emptyMap()) }
+    var activeCampusDays by remember { mutableIntStateOf(0) }
     var weekdayWeekend by remember { mutableStateOf<Pair<DayTypeStats, DayTypeStats>?>(null) }
     var totalRecords by remember { mutableIntStateOf(0) }
 
@@ -127,12 +128,35 @@ fun CampusCardScreen(
                 transactions = allTx
                 totalRecords = allTx.size
                 currentPage = (allTx.size + 49) / 50
-                // 缓存最近 5 笔消费供首页智能卡片使用
+                // 缓存最近 5 笔消费供首页智能卡片使用；同时缓存今日消费给校园卡小组件
                 run {
                     val recentJson = com.google.gson.Gson().toJson(allTx.take(5))
+                    val todayStr = LocalDate.now().toString()
+                    val todaySpend = allTx
+                        .filter { tx -> tx.time.startsWith(todayStr) && tx.amount < 0 }
+                        .sumOf { tx -> -tx.amount }
+                    // 今日三餐消费
+                    val todayBreakfast = allTx.filter { tx ->
+                        tx.time.startsWith(todayStr) && tx.amount < 0 &&
+                            tx.time.substringAfter(" ").substringBefore(":").toIntOrNull()?.let { h -> h in 5..10 } == true
+                    }.sumOf { tx -> -tx.amount }
+                    val todayLunch = allTx.filter { tx ->
+                        tx.time.startsWith(todayStr) && tx.amount < 0 &&
+                            tx.time.substringAfter(" ").substringBefore(":").toIntOrNull()?.let { h -> h in 11..14 } == true
+                    }.sumOf { tx -> -tx.amount }
+                    val todayDinner = allTx.filter { tx ->
+                        tx.time.startsWith(todayStr) && tx.amount < 0 &&
+                            tx.time.substringAfter(" ").substringBefore(":").toIntOrNull()?.let { h -> h in 17..21 } == true
+                    }.sumOf { tx -> -tx.amount }
                     context.getSharedPreferences("campus_card", 0).edit()
                         .putString("card_recent_tx_cache", recentJson)
+                        .putFloat("card_today_spend_cache", todaySpend.toFloat())
+                        .putFloat("card_today_breakfast_cache", todayBreakfast.toFloat())
+                        .putFloat("card_today_lunch_cache", todayLunch.toFloat())
+                        .putFloat("card_today_dinner_cache", todayDinner.toFloat())
                         .apply()
+                    // 通知校园卡小组件刷新
+                    com.xjtu.toolbox.widget.CampusCardWidgetUpdater.requestUpdate(context)
                 }
 
                 // 并行计算统计
@@ -143,7 +167,9 @@ fun CampusCardScreen(
                     val s4 = async { api.analyzeWeekdayVsWeekend(allTx) }
                     monthlyStats = s1.await()
                     categorySpending = s2.await()
-                    mealTimeStats = s3.await()
+                    val (mealStats3, campusDays3) = s3.await()
+                    mealTimeStats = mealStats3
+                    activeCampusDays = campusDays3
                     weekdayWeekend = s4.await()
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -173,7 +199,9 @@ fun CampusCardScreen(
                         currentPage++
                         monthlyStats = api.calculateMonthlyStats(transactions)
                         categorySpending = api.categorizeSpending(transactions)
-                        mealTimeStats = api.analyzeMealTimes(transactions)
+                        val (mealStats4, campusDays4) = api.analyzeMealTimes(transactions)
+                        mealTimeStats = mealStats4
+                        activeCampusDays = campusDays4
                         weekdayWeekend = api.analyzeWeekdayVsWeekend(transactions)
                     }
                 }
@@ -249,7 +277,7 @@ fun CampusCardScreen(
                                 onTimeRangeChange = { selectedTimeRange = it; loadData(it) })
                             2 -> AnalyticsTab(
                                 monthlyStats, categorySpending, mealTimeStats, weekdayWeekend,
-                                selectedTimeRange,
+                                activeCampusDays, selectedTimeRange,
                                 onTimeRangeChange = { selectedTimeRange = it; loadData(it) }
                             )
                         }
@@ -686,6 +714,7 @@ private fun AnalyticsTab(
     categorySpending: Map<String, Double>,
     mealTimeStats: Map<String, MealTimeStats>,
     weekdayWeekend: Pair<DayTypeStats, DayTypeStats>?,
+    activeCampusDays: Int,
     selectedTimeRange: TimeRange,
     onTimeRangeChange: (TimeRange) -> Unit
 ) {
@@ -709,7 +738,7 @@ private fun AnalyticsTab(
             if (mealTimeStats.isNotEmpty()) { item { MealAnalysisCard(mealTimeStats) } }
             if (weekdayWeekend != null) { item { WeekdayWeekendCard(weekdayWeekend) } }
             if (monthlyStats.isNotEmpty()) { item { TopMerchantsCard(monthlyStats) } }
-            item { SpendingInsightsCard(monthlyStats, categorySpending, mealTimeStats, weekdayWeekend) }
+            item { SpendingInsightsCard(monthlyStats, categorySpending, mealTimeStats, weekdayWeekend, activeCampusDays) }
         }
     }
 }
@@ -1008,10 +1037,11 @@ private fun SpendingInsightsCard(
     stats: List<MonthlyStats>,
     categories: Map<String, Double>,
     mealStats: Map<String, MealTimeStats>,
-    weekdayWeekend: Pair<DayTypeStats, DayTypeStats>?
+    weekdayWeekend: Pair<DayTypeStats, DayTypeStats>?,
+    activeCampusDays: Int
 ) {
-    val insights = remember(stats, categories, mealStats, weekdayWeekend) {
-        generateInsights(stats, categories, mealStats, weekdayWeekend)
+    val insights = remember(stats, categories, mealStats, weekdayWeekend, activeCampusDays) {
+        generateInsights(stats, categories, mealStats, weekdayWeekend, activeCampusDays)
     }
     if (insights.isEmpty()) return
 
@@ -1082,7 +1112,8 @@ private fun generateInsights(
     stats: List<MonthlyStats>,
     categories: Map<String, Double>,
     mealStats: Map<String, MealTimeStats>,
-    weekdayWeekend: Pair<DayTypeStats, DayTypeStats>?
+    weekdayWeekend: Pair<DayTypeStats, DayTypeStats>?,
+    activeCampusDays: Int
 ): List<Pair<ImageVector, String>> {
     val insights = mutableListOf<Pair<ImageVector, String>>()
     val total = categories.values.sum()
@@ -1155,17 +1186,18 @@ private fun generateInsights(
                 "单日最高消费: ${formatDateShort(peakMonth.peakDay)} 花了 ¥%.0f".format(peakMonth.peakDayAmount))
     }
 
-    // 7. 早餐频率（count 已改为天数而非交易笔数）
+    // 7. 早餐频率（用"在校天数"做分母，即至少有一顿正餐的自然日）
     val breakfast = mealStats["早餐"]
-    val totalDays = stats.sumOf {
+    // 如果没有在校天数（全部是零食或少于数据），则退化为日历天数
+    val denominator = if (activeCampusDays > 3) activeCampusDays else stats.sumOf {
         if (it.month == YearMonth.now()) LocalDate.now().dayOfMonth
         else it.month.lengthOfMonth()
     }.coerceAtLeast(1)
-    if (breakfast != null && totalDays > 3) {
-        val breakfastRate = (breakfast.count.toDouble() / totalDays * 100).coerceAtMost(100.0)
+    if (breakfast != null && denominator > 3) {
+        val breakfastRate = (breakfast.count.toDouble() / denominator * 100).coerceAtMost(100.0)
         insights.add(Icons.Default.WbSunny to
-                if (breakfastRate < 50) "早餐频率较低（%.0f%%），记得好好吃早餐哦~".format(breakfastRate)
-                else "早餐习惯不错，%.0f%% 的天数有吃早餐".format(breakfastRate))
+                if (breakfastRate < 50) "在校天数中仅 %.0f%% 有吃早餐，记得好好吃早餐哦~".format(breakfastRate)
+                else "早餐习惯不错，在校天数中有 %.0f%% 吃了早餐".format(breakfastRate))
     }
 
     // 8. 水电提示
@@ -1175,10 +1207,10 @@ private fun generateInsights(
     }
 
     // 9. 日均消费
-    if (total > 0 && totalDays > 7) {
+    if (total > 0 && denominator > 7) {
         insights.add(Icons.Default.Timeline to
                 "统计期间日均消费 ¥%.1f，月均 ¥%.0f".format(
-                    total / totalDays, total / stats.size.coerceAtLeast(1)))
+                    total / denominator, total / stats.size.coerceAtLeast(1)))
     }
 
     return insights

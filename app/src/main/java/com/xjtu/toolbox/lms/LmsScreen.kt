@@ -2,6 +2,7 @@ package com.xjtu.toolbox.lms
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Log
 import androidx.activity.compose.BackHandler
@@ -11,6 +12,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -24,16 +27,21 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.xjtu.toolbox.ui.components.AppFilterChip
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.jsoup.Jsoup
 import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.extra.SuperBottomSheet
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -537,13 +545,20 @@ private fun ActivityDetailPage(
                         // 基本信息卡
                         item(key = "info") { ActivityInfoCard(d) }
 
-                        // 作业描述
+                        // 作业描述（HTML 去标签后展示）
                         if (!d.description.isNullOrBlank()) {
                             item(key = "desc") {
+                                val plainText = remember(d.description) {
+                                    val doc = Jsoup.parse(d.description!!)
+                                    doc.select("br").forEach { it.before("\n") }
+                                    doc.select("p").forEach { it.after("\n") }
+                                    doc.body()?.wholeOwnText()?.trim()?.ifBlank { null }
+                                        ?: doc.text()
+                                }
                                 SectionHeader("作业描述")
                                 Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                                     Text(
-                                        d.description!!,
+                                        plainText,
                                         style = MiuixTheme.textStyles.body2,
                                         modifier = Modifier.padding(16.dp)
                                     )
@@ -555,7 +570,7 @@ private fun ActivityDetailPage(
                         if (d.uploads.isNotEmpty()) {
                             item(key = "uploads_header") { SectionHeader("附件 (${d.uploads.size})") }
                             items(d.uploads, key = { "upload_${it.id}" }) { upload ->
-                                UploadCard(upload, context)
+                                UploadCard(upload, context, api)
                             }
                         }
 
@@ -787,12 +802,51 @@ private fun InfoChip(text: String, icon: ImageVector) {
 }
 
 @Composable
-private fun UploadCard(upload: LmsUpload, context: Context) {
+private fun UploadCard(upload: LmsUpload, context: Context, api: LmsApi? = null) {
+    val isImage = upload.type.startsWith("image", ignoreCase = true)
+    var previewBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var isDownloading by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    // 图片预览弹窗
+    if (previewBitmap != null) {
+        Dialog(
+            onDismissRequest = { previewBitmap = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .clickable { previewBitmap = null },
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    bitmap = previewBitmap!!.asImageBitmap(),
+                    contentDescription = upload.name,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
+
     Card(
         onClick = {
-            val url = upload.downloadUrl.ifEmpty { upload.previewUrl }
-            if (url.isNotEmpty()) {
-                try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } catch (_: Exception) {}
+            if (isImage && api != null) {
+                val url = upload.downloadUrl.ifEmpty { upload.previewUrl }
+                if (url.isNotEmpty() && !isDownloading) {
+                    isDownloading = true
+                    scope.launch {
+                        val bytes = withContext(Dispatchers.IO) { api.downloadBytes(url) }
+                        previewBitmap = bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+                        isDownloading = false
+                    }
+                }
+            } else {
+                val url = upload.downloadUrl.ifEmpty { upload.previewUrl }
+                if (url.isNotEmpty()) {
+                    try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } catch (_: Exception) {}
+                }
             }
         },
         pressFeedbackType = PressFeedbackType.Sink,
@@ -810,7 +864,14 @@ private fun UploadCard(upload: LmsUpload, context: Context) {
                     Text(upload.readableSize, fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                 }
             }
-            Icon(Icons.Default.Download, null, tint = MiuixTheme.colorScheme.primary)
+            if (isDownloading) {
+                CircularProgressIndicator(size = 20.dp, strokeWidth = 2.dp)
+            } else {
+                Icon(
+                    if (isImage && api != null) Icons.Default.ZoomIn else Icons.Default.Download,
+                    null, tint = MiuixTheme.colorScheme.primary
+                )
+            }
         }
     }
 }

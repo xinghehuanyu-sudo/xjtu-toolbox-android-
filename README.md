@@ -3,7 +3,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/platform-Android-green?logo=android" />
   <img src="https://img.shields.io/badge/minSdk-31_(Android_12)-blue" />
-  <img src="https://img.shields.io/badge/version-2.7.1-orange" />
+  <img src="https://img.shields.io/badge/version-2.8.0-orange" />
   <img src="https://img.shields.io/badge/license-MIT-lightgrey" />
 </p>
 
@@ -95,6 +95,15 @@ git push origin v2.7.1
 ---
 
 ## 更新日志
+
+### v2.8.0
+
+- 新增校园卡桌面小组件（4×2）：余额、今日消费及早/午/晚三餐明细
+- 应用内更新：直接下载并安装新版 APK，基于 Gitee Releases
+- 首页新增"校历"入口
+- 课表小组件 MIUIX 风格优化：去除描边、16dp 圆角、课程名称与时间上下排列
+- 修复所有小组件崩溃/无法添加问题（RemoteViews XML 兼容性 + exported 属性）
+- "关于"页优化：应用信息行改为 GitHub 源代码仓库链接，移除冗余行
 
 ### v2.7.1
 

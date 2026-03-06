@@ -1,0 +1,100 @@
+name: Sync to Gitee
+
+on:
+  push:
+    branches: [ main ]
+  release:
+    types: [ published ]
+
+jobs:
+  sync-code:
+    name: Sync Code to Gitee
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to Gitee
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}
+        run: |
+          git remote add gitee "https://yeliqin666:${GITEE_TOKEN}@gitee.com/yeliqin666/xjtu-toolbox-android.git"
+          git push gitee main:main --force
+
+  sync-release:
+    name: Sync Release to Gitee
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get release info
+        id: release
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          NAME="${{ github.event.release.name }}"
+          BODY="${{ github.event.release.body }}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+          # 截断换行用于 JSON
+          BODY_ESCAPED=$(echo "$BODY" | head -c 2000 | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))" | tr -d '"')
+          echo "body=$BODY_ESCAPED" >> $GITHUB_OUTPUT
+
+      - name: Download APK from GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "${{ steps.release.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "*.apk" \
+            --dir ./artifacts
+
+      - name: Create Gitee Release and Upload APK
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}
+        run: |
+          TAG="${{ steps.release.outputs.tag }}"
+          NAME="${{ steps.release.outputs.name }}"
+          BODY="同步自 GitHub Release ${TAG}"
+          OWNER="yeliqin666"
+          REPO="xjtu-toolbox-android"
+
+          # 先尝试删除旧 release（防止重复）
+          OLD_ID=$(curl -s "https://gitee.com/api/v5/repos/${OWNER}/${REPO}/releases/tags/${TAG}?access_token=${GITEE_TOKEN}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id',''))" 2>/dev/null || echo "")
+          if [ -n "$OLD_ID" ] && [ "$OLD_ID" != "None" ]; then
+            curl -s -X DELETE "https://gitee.com/api/v5/repos/${OWNER}/${REPO}/releases/${OLD_ID}?access_token=${GITEE_TOKEN}"
+            echo "Deleted old release $OLD_ID"
+          fi
+
+          # 创建 release
+          RESPONSE=$(curl -s -X POST "https://gitee.com/api/v5/repos/${OWNER}/${REPO}/releases" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"access_token\": \"${GITEE_TOKEN}\",
+              \"tag_name\": \"${TAG}\",
+              \"name\": \"${NAME}\",
+              \"body\": \"${BODY}\",
+              \"prerelease\": ${{ github.event.release.prerelease }}
+            }")
+          echo "Create release response: $RESPONSE"
+
+          RELEASE_ID=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id',''))")
+          echo "Release ID: $RELEASE_ID"
+
+          if [ -z "$RELEASE_ID" ] || [ "$RELEASE_ID" = "None" ]; then
+            echo "Failed to create release on Gitee"
+            exit 1
+          fi
+
+          # 上传 APK 附件
+          APK_FILE=$(ls ./artifacts/*.apk | head -1)
+          if [ -n "$APK_FILE" ]; then
+            echo "Uploading $APK_FILE..."
+            UPLOAD_RESP=$(curl -s -X POST \
+              "https://gitee.com/api/v5/repos/${OWNER}/${REPO}/releases/${RELEASE_ID}/attach_files" \
+              -F "access_token=${GITEE_TOKEN}" \
+              -F "file=@${APK_FILE}")
+            echo "Upload response: $UPLOAD_RESP"
+          else
+            echo "No APK file found in artifacts"
+          fi

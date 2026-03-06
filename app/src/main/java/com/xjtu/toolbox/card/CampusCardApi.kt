@@ -331,17 +331,9 @@ class CampusCardApi(private val login: CampusCardLogin) {
     /**
      * 用餐时段分析（早/中/晚/夜宵）
      * 返回每个时段的次数由【天数】统计（同一天同时段多笔交易算一天）
+     * 同时返回"在校天数"——至少有一顿正餐记录的自然日数（用于早餐率分母）
      */
-    fun analyzeMealTimes(transactions: List<Transaction>): Map<String, MealTimeStats> {
-        // 按时段+日期分组，同一天同时段的多笔交易合并为一次用餐
-        data class MealEntry(val date: String, val totalAmount: Double)
-        val meals = mutableMapOf(
-            "早餐" to mutableListOf<MealEntry>(),
-            "午餐" to mutableListOf<MealEntry>(),
-            "晚餐" to mutableListOf<MealEntry>(),
-            "夜宵" to mutableListOf<MealEntry>()
-        )
-
+    fun analyzeMealTimes(transactions: List<Transaction>): Pair<Map<String, MealTimeStats>, Int> {
         // 先按时段收集所有交易，再按日期聚合
         val rawMeals = mutableMapOf<String, MutableMap<String, MutableList<Double>>>()
         for (period in listOf("早餐", "午餐", "晚餐", "夜宵")) {
@@ -357,26 +349,36 @@ class CampusCardApi(private val login: CampusCardLogin) {
                 tx.time.substringAfter(" ").substringBefore(":").toInt()
             } catch (_: Exception) { continue }
 
+            // 时段划分：下午3-4点（15/16时）不归入正餐，避免把"买杯下午茶"算成晚餐
             val period = when (hour) {
-                in 5..9 -> "早餐"
-                in 10..14 -> "午餐"
-                in 15..20 -> "晚餐"
-                else -> "夜宵"  // 21-4
+                in 5..10 -> "早餐"   // 5am-10am
+                in 11..14 -> "午餐"  // 11am-2pm
+                in 17..21 -> "晚餐"  // 5pm-9pm
+                in 22..23, in 0..4 -> "夜宵"  // 10pm-4am
+                else -> null        // 3pm-4pm(15/16时) — 下午茶/零食，不计入
             }
+            if (period == null) continue
             val date = tx.time.substringBefore(" ")
             rawMeals[period]?.getOrPut(date) { mutableListOf() }?.add(-tx.amount)
         }
 
-        return rawMeals.filter { it.value.isNotEmpty() }.mapValues { (_, dateMap) ->
+        // 在校天数 = 任意正餐时段（早/午/晚）有消费记录的 distinct 日期数
+        val activeDates = (rawMeals["早餐"]?.keys.orEmpty() +
+                rawMeals["午餐"]?.keys.orEmpty() +
+                rawMeals["晚餐"]?.keys.orEmpty()).toSet()
+        val activeCampusDays = activeDates.size
+
+        val mealStats = rawMeals.filter { it.value.isNotEmpty() }.mapValues { (_, dateMap) ->
             val dayCount = dateMap.size  // 有该时段用餐的天数
             val totalAmount = dateMap.values.sumOf { it.sum() }
             val avgPerDay = if (dayCount > 0) totalAmount / dayCount else 0.0
             MealTimeStats(
-                count = dayCount,  // 天数而非交易笔数
+                count = dayCount,
                 totalAmount = totalAmount,
-                avgAmount = avgPerDay  // 每次用餐（每天该时段）的平均花费
+                avgAmount = avgPerDay
             )
         }
+        return mealStats to activeCampusDays
     }
 
     /**

@@ -37,7 +37,8 @@
             android:id="@+id/widget_week"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginHorizontal="4dp"
+            android:layout_marginLeft="4dp"
+            android:layout_marginRight="4dp"
             android:maxLines="1"
             android:textColor="@color/widget_on_surface_secondary"
             android:textSize="11sp" />

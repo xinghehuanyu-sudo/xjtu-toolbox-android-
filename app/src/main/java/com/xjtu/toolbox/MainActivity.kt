@@ -17,6 +17,8 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.animateDp
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.draw.drawWithContent
 
 import top.yukonga.miuix.kmp.utils.SinkFeedback
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
@@ -172,6 +174,7 @@ object Routes {
     const val CLASS_REPLAY = "class_replay"
     const val LMS = "lms"
     const val SCHOOL_COURSE = "school_course"
+    const val SCHOOL_CALENDAR = "school_calendar"
     const val VIDEO_PLAYER = "video_player/{activityId}"
     const val BROWSER = "browser?url={url}"
 
@@ -1263,6 +1266,12 @@ fun AppNavigation(
                 onBack = { navController.popBackStack() }
             )
         }
+        composable(Routes.SCHOOL_CALENDAR) {
+            com.xjtu.toolbox.calendar.SchoolCalendarScreen(
+                login = loginState.jwxtLogin,
+                onBack = { navController.popBackStack() }
+            )
+        }
         composable(
             Routes.VIDEO_PLAYER,
             arguments = listOf(navArgument("activityId") { type = NavType.IntType })
@@ -1505,7 +1514,7 @@ private fun MainScreen(navController: NavHostController, loginState: AppLoginSta
                             ) {
                                 when (tab) {
                                     BottomTab.HOME -> HomeTab(loginState, isRestoring = isRestoring, onNavigate = onNavigateWithNetCheck, onNavigateWithLogin = ::navigateWithLogin, onNavigateToProfile = { selectedTabOrdinal = BottomTab.PROFILE.ordinal }, scrollBehavior = homeScrollBehavior)
-                                    BottomTab.ACADEMIC -> AcademicTab(loginState, ::navigateWithLogin, scrollBehavior = academicScrollBehavior)
+                                    BottomTab.ACADEMIC -> AcademicTab(loginState, ::navigateWithLogin, onNavigateWithNetCheck, scrollBehavior = academicScrollBehavior)
                                     BottomTab.TOOLS -> ToolsTab(loginState, ::navigateWithLogin, onNavigateWithNetCheck, scrollBehavior = toolsScrollBehavior)
                                     BottomTab.PROFILE -> ProfileTab(loginState, ::navigateWithLogin, credentialStore, scrollBehavior = profileScrollBehavior)
                                 }
@@ -2009,6 +2018,9 @@ private fun HomeTab(
                 { m -> HomeServiceCard(Icons.Default.School, "思源学堂", "课件 · 作业", svcIndigo, m) { onNavigateWithLogin(Routes.LMS, LoginType.LMS) } },
                 { m -> HomeServiceCard(Icons.Default.TravelExplore, "课表查询", "全校课程", svcCyan, m) { onNavigateWithLogin(Routes.SCHOOL_COURSE, LoginType.JWXT) } }
             )
+            svcRow(
+                { m -> HomeServiceCard(Icons.Default.EventNote, "校历", "学期 · 假期 · 周次", svcTeal, m) { onNavigate(Routes.SCHOOL_CALENDAR) } }
+            )
         }
 
         Spacer(Modifier.height(100.dp))
@@ -2020,7 +2032,7 @@ private fun HomeTab(
 // ══════════════════════════════════════════
 
 @Composable
-private fun AcademicTab(loginState: AppLoginState, onNavigateWithLogin: (String, LoginType) -> Unit, scrollBehavior: ScrollBehavior? = null) {
+private fun AcademicTab(loginState: AppLoginState, onNavigateWithLogin: (String, LoginType) -> Unit, onNavigate: (String) -> Unit = {}, scrollBehavior: ScrollBehavior? = null) {
     Column(
         Modifier
             .fillMaxSize()
@@ -2047,6 +2059,7 @@ private fun AcademicTab(loginState: AppLoginState, onNavigateWithLogin: (String,
         ServiceCard(Icons.Default.DateRange, "考勤查询", "查看课堂出勤情况", loginState.attendanceLogin != null, iconColor = cBrown) { onNavigateWithLogin(Routes.ATTENDANCE, LoginType.ATTENDANCE) }
         ServiceCard(Icons.Default.RateReview, "本科评教", "一键自动评教", loginState.jwxtLogin != null, iconColor = cPink) { onNavigateWithLogin(Routes.JUDGE, LoginType.JWXT) }
         ServiceCard(Icons.Default.TravelExplore, "全校课表查询", "全校课程检索 · 地点 · 选课人数", loginState.jwxtLogin != null, iconColor = cCyan) { onNavigateWithLogin(Routes.SCHOOL_COURSE, LoginType.JWXT) }
+        ServiceCard(Icons.Default.EventNote, "校历", "学期安排 · 假期 · 考试周", true, iconColor = cTeal) { onNavigate(Routes.SCHOOL_CALENDAR) }
 
         Spacer(Modifier.height(16.dp))
 
@@ -2167,6 +2180,22 @@ private fun ToolsTab(loginState: AppLoginState, onNavigateWithLogin: (String, Lo
 // ══════════════════════════════════════════
 //  Tab 4 — 我的（含统一登录）
 // ══════════════════════════════════════════
+
+/** "我的"页卡片的下压暗叠层按压反馈，替代 SinkFeedback 收缩动画 */
+@Composable
+private fun Modifier.pressOverlay(
+    enabled: Boolean = true,
+    onClick: () -> Unit
+): Modifier {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    return this
+        .clickable(interactionSource = interactionSource, indication = null, enabled = enabled, onClick = onClick)
+        .drawWithContent {
+            drawContent()
+            if (isPressed) drawRect(color = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.07f))
+        }
+}
 
 @Composable
 private fun ProfileTab(loginState: AppLoginState, onNavigateWithLogin: (String, LoginType) -> Unit, credentialStore: CredentialStore, scrollBehavior: ScrollBehavior? = null) {
@@ -2938,10 +2967,7 @@ private fun ProfileTab(loginState: AppLoginState, onNavigateWithLogin: (String, 
                         Row(
                             Modifier
                                 .fillMaxWidth()
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = SinkFeedback()
-                                ) { showLogoutDialog.value = true }
+                                .pressOverlay { showLogoutDialog.value = true }
                                 .padding(horizontal = 20.dp, vertical = 14.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -3010,10 +3036,7 @@ private fun ProfileTab(loginState: AppLoginState, onNavigateWithLogin: (String, 
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = SinkFeedback()
-                            ) { uriHandler.openUri("https://www.runqinliu666.cn/") }
+                            .pressOverlay { uriHandler.openUri("https://github.com/yeliqin666/xjtu-toolbox-android") }
                             .padding(horizontal = 20.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -3025,7 +3048,7 @@ private fun ProfileTab(loginState: AppLoginState, onNavigateWithLogin: (String, 
                         Spacer(Modifier.width(14.dp))
                         Column(Modifier.weight(1f)) {
                             Text("岱宗盒子", style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Bold)
-                            Text("by Yeliqin666 · 点击访问主页", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.primary.copy(alpha = 0.7f))
+                            Text("源代码仓库 · GitHub", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.primary.copy(alpha = 0.7f))
                         }
                         Surface(shape = RoundedCornerShape(6.dp), color = MiuixTheme.colorScheme.secondaryContainer) {
                             Text("v${BuildConfig.VERSION_NAME}", Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
@@ -3038,14 +3061,15 @@ private fun ProfileTab(loginState: AppLoginState, onNavigateWithLogin: (String, 
                     // 检查更新行
                     var updateCheckState by remember { mutableStateOf<String?>(null) }
                     var latestDownloadUrl by remember { mutableStateOf<String?>(null) }
+                    var isDownloading by remember { mutableStateOf(false) }
+                    var downloadProgress by remember { mutableFloatStateOf(0f) }
                     val updateScope = rememberCoroutineScope()
+                    val updateContext = androidx.compose.ui.platform.LocalContext.current
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = SinkFeedback(),
-                                enabled = updateCheckState != "checking"
+                            .pressOverlay(
+                                enabled = updateCheckState != "checking" && !isDownloading
                             ) {
                                 updateCheckState = "checking"
                                 latestDownloadUrl = null
@@ -3056,8 +3080,8 @@ private fun ProfileTab(loginState: AppLoginState, onNavigateWithLogin: (String, 
                                             .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
                                             .build()
                                         val req = okhttp3.Request.Builder()
-                                            .url("https://api.github.com/repos/yeliqin666/xjtu-toolbox-android/releases/latest")
-                                            .header("Accept", "application/vnd.github+json")
+                                            .url("https://gitee.com/api/v5/repos/yeliqin666/xjtu-toolbox-android/releases/latest")
+                                            .header("Accept", "application/json")
                                             .build()
                                         val resp = client.newCall(req).execute()
                                         if (!resp.isSuccessful) { updateCheckState = "error:HTTP ${resp.code}"; return@launch }
@@ -3115,15 +3139,92 @@ private fun ProfileTab(loginState: AppLoginState, onNavigateWithLogin: (String, 
                             )
                         }
                         if (latestDownloadUrl != null && updateCheckState != null && !updateCheckState!!.startsWith("error:") && updateCheckState != "latest" && updateCheckState != "checking") {
-                            Button(
-                                onClick = { uriHandler.openUri(latestDownloadUrl!!) },
-                                modifier = Modifier,
-                                insideMargin = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                colors = ButtonDefaults.buttonColors(color = MiuixTheme.colorScheme.primary)
-                            ) {
-                                Icon(Icons.Default.Download, null, Modifier.size(14.dp), tint = MiuixTheme.colorScheme.onPrimary)
-                                Spacer(Modifier.width(4.dp))
-                                Text("下载更新", style = MiuixTheme.textStyles.footnote1, color = MiuixTheme.colorScheme.onPrimary)
+                            if (isDownloading) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CircularProgressIndicator(
+                                        progress = downloadProgress,
+                                        size = 20.dp,
+                                        strokeWidth = 2.dp,
+                                        colors = ProgressIndicatorDefaults.progressIndicatorColors(foregroundColor = MiuixTheme.colorScheme.primary)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        "${(downloadProgress * 100).toInt()}%",
+                                        style = MiuixTheme.textStyles.footnote1,
+                                        color = MiuixTheme.colorScheme.primary
+                                    )
+                                }
+                            } else {
+                                Button(
+                                    onClick = {
+                                        val pm = updateContext.packageManager
+                                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O
+                                            && !pm.canRequestPackageInstalls()
+                                        ) {
+                                            val intent = android.content.Intent(
+                                                android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                                android.net.Uri.parse("package:${updateContext.packageName}")
+                                            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            updateContext.startActivity(intent)
+                                        } else {
+                                            isDownloading = true
+                                            downloadProgress = 0f
+                                            updateScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                                try {
+                                                    val dlClient = okhttp3.OkHttpClient.Builder()
+                                                        .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                                                        .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
+                                                        .build()
+                                                    val dlReq = okhttp3.Request.Builder().url(latestDownloadUrl!!).build()
+                                                    val dlResp = dlClient.newCall(dlReq).execute()
+                                                    val dlBody = dlResp.body ?: throw Exception("空响应")
+                                                    val contentLength = dlBody.contentLength()
+                                                    val apkFile = java.io.File(updateContext.cacheDir, "update.apk")
+                                                    dlBody.byteStream().use { input ->
+                                                        apkFile.outputStream().use { output ->
+                                                            val buffer = ByteArray(8192)
+                                                            var downloaded = 0L
+                                                            var count: Int
+                                                            while (input.read(buffer).also { count = it } != -1) {
+                                                                output.write(buffer, 0, count)
+                                                                downloaded += count
+                                                                if (contentLength > 0) {
+                                                                    downloadProgress = downloaded.toFloat() / contentLength.toFloat()
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                                        isDownloading = false
+                                                        val apkUri = androidx.core.content.FileProvider.getUriForFile(
+                                                            updateContext,
+                                                            "${updateContext.packageName}.fileprovider",
+                                                            apkFile
+                                                        )
+                                                        val installIntent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                                                            setDataAndType(apkUri, "application/vnd.android.package-archive")
+                                                            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                        }
+                                                        updateContext.startActivity(installIntent)
+                                                    }
+                                                } catch (e: Exception) {
+                                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                                        isDownloading = false
+                                                        updateCheckState = "error:下载失败"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier,
+                                    insideMargin = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                    colors = ButtonDefaults.buttonColors(color = MiuixTheme.colorScheme.primary)
+                                ) {
+                                    Icon(Icons.Default.Download, null, Modifier.size(14.dp), tint = MiuixTheme.colorScheme.onPrimary)
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("下载更新", style = MiuixTheme.textStyles.footnote1, color = MiuixTheme.colorScheme.onPrimary)
+                                }
                             }
                         } else if (updateCheckState != "checking") {
                             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(18.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.5f))
@@ -3141,40 +3242,11 @@ private fun ProfileTab(loginState: AppLoginState, onNavigateWithLogin: (String, 
                 colors = top.yukonga.miuix.kmp.basic.CardDefaults.defaultColors(color = MiuixTheme.colorScheme.surfaceVariant)
             ) {
                 Column {
-                    // 源代码 — 引导参与
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = SinkFeedback()
-                            ) { uriHandler.openUri("https://github.com/yeliqin666/xjtu-toolbox-android") }
-                            .padding(horizontal = 20.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Surface(shape = CircleShape, color = androidx.compose.ui.graphics.Color(0xFF37474F).copy(alpha = 0.15f), modifier = Modifier.size(36.dp)) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.Code, null, Modifier.size(18.dp), tint = androidx.compose.ui.graphics.Color(0xFF37474F))
-                            }
-                        }
-                        Spacer(Modifier.width(14.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("源代码 · 开源透明", style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Medium)
-                            Text("GitHub 开源 · 欢迎 Star / Issue / PR", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                        }
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(18.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.5f))
-                    }
-
-                    HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MiuixTheme.colorScheme.outline.copy(alpha = 0.3f))
-
                     // 反馈建议 — 引导提 Issue
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = SinkFeedback()
-                            ) { uriHandler.openUri("https://github.com/yeliqin666/xjtu-toolbox-android/issues") }
+                            .pressOverlay { uriHandler.openUri("https://github.com/yeliqin666/xjtu-toolbox-android/issues") }
                             .padding(horizontal = 20.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -3197,10 +3269,7 @@ private fun ProfileTab(loginState: AppLoginState, onNavigateWithLogin: (String, 
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = SinkFeedback()
-                            ) { uriHandler.openUri("https://github.com/yan-xiaoo/XJTUToolBox") }
+                            .pressOverlay { uriHandler.openUri("https://github.com/yan-xiaoo/XJTUToolBox") }
                             .padding(horizontal = 20.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -3231,10 +3300,7 @@ private fun ProfileTab(loginState: AppLoginState, onNavigateWithLogin: (String, 
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = SinkFeedback()
-                            ) { plansExpanded = !plansExpanded }
+                            .pressOverlay { plansExpanded = !plansExpanded }
                             .padding(horizontal = 20.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -3612,6 +3678,15 @@ private val CHANGELOGS: Map<String, VersionChangelog> = mapOf(
             "👍" to "UI 优化与多处细节改进"
         )
     ),
+    "2.8.0" to VersionChangelog(
+        items = listOf(
+            "💳" to "新增校园卡桌面小组件（4×2）：余额、今日消费及早/午/晚三餐明细",
+            "🔄" to "应用内更新：直接下载并安装新版 APK（基于 Gitee Releases）",
+            "🗓️" to "新增校历",
+            "🐛" to "修复所有小组件崩溃/无法添加问题（RemoteViews 兼容性）",
+            "👤" to "边边角角修复与优化"
+        )
+    ),
     "2.7.1" to VersionChangelog(
         items = listOf(
             "🧩" to "新增课表桌面小组件（2×2 / 4×2 两种规格，支持当日课程一览）",
@@ -3619,7 +3694,6 @@ private val CHANGELOGS: Map<String, VersionChangelog> = mapOf(
             "🔏" to "APK 签名由 v2 升级为 v2+v3，增强安全性与支持未来密钥轮换"
         ),
         issues = listOf(
-            "图书馆换座功能暂无效果",
             "入馆后可能错误显示「取消预约」按钮"
         )
     ),

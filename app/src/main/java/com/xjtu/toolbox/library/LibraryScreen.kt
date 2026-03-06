@@ -238,6 +238,7 @@ fun LibraryScreen(login: LibraryLogin, onBack: () -> Unit) {
             ?: LibraryApi.guessAreaCode(seatId)
             ?: run { bookingResult = BookResult(false, "无法确定区域"); return }
         isBooking = true; bookingResult = null
+
         scope.launch {
             try {
                 val result = withContext(Dispatchers.IO) { api.bookSeat(seatId, areaCode) }
@@ -254,6 +255,26 @@ fun LibraryScreen(login: LibraryLogin, onBack: () -> Unit) {
         }
     }
 
+    // 直接换座（已知有现有预约时使用）
+    fun doSwapSeat(seatId: String) {
+        val areaCode = LibraryApi.AREA_MAP[selectedArea]
+            ?: LibraryApi.guessAreaCode(seatId)
+            ?: run { bookingResult = BookResult(false, "无法确定区域"); return }
+        isBooking = true; bookingResult = null
+        scope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) { api.swapSeat(seatId, areaCode) }
+                bookingResult = result
+                if (result.success) {
+                    loadSeats()
+                    try { myBooking = withContext(Dispatchers.IO) { api.getMyBooking() } } catch (_: Exception) {}
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { bookingResult = BookResult(false, "换座异常: ${e.message}") }
+            isBooking = false
+        }
+    }
+
     // 预约前检查：如有现有预约则弹窗确认换座
     fun bookSeat(seatId: String) {
         val existing = myBooking?.seatId
@@ -261,8 +282,8 @@ fun LibraryScreen(login: LibraryLogin, onBack: () -> Unit) {
         if (existing != null && !isExpired) {
             val area = myBooking?.area?.let { " ($it)" } ?: ""
             confirmDialog = "你已预约座位 $existing$area\n是否换座到 $seatId？" to {
-                // 直接预约新座位，bookSeat 内部自动检测并确认换座
-                doBookSeat(seatId)
+                // 直接调用 /updateseat/ 端点，不走 /seat/ 的检测逻辑
+                doSwapSeat(seatId)
             }
         } else {
             doBookSeat(seatId)

@@ -155,6 +155,17 @@ class LmsApi(private val login: LmsLogin) {
 
     // ── 内部方法 ──────────────────────────
 
+    /** 下载任意 URL 的字节数组（带认证），用于附件预览 */
+    fun downloadBytes(url: String): ByteArray? {
+        return try {
+            val resp = login.executeWithReAuth(login.authenticatedRequest(url).get())
+            resp.body?.use { it.bytes() }
+        } catch (e: Exception) {
+            Log.e(TAG, "downloadBytes failed: $url", e)
+            null
+        }
+    }
+
     private fun getIndexPage(): String {
         val req = login.authenticatedRequest("$baseUrl/user/index").get()
         val resp = login.executeWithReAuth(req)
