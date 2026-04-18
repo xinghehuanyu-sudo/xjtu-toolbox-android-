@@ -1,0 +1,35 @@
+*.iml
+.gradle
+/local.properties
+/.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+/.vscode/
+/.github/copilot-instructions.md
+# Signing
+release.jks
+release.jks.b64
+.kotlin/
+# Gradle
+.gradle/
+build/
+
+# APK
+*.apk
+*.ap_
+*.aab
+# Dex metadata
+*.dm
+# Generated files
+output.json
+output-metadata.json
+
+# Local config
+local.properties
+
+# KuiklyUI CMP migration project (separate git repo)
+XJTUTOOLBOX_CMP/

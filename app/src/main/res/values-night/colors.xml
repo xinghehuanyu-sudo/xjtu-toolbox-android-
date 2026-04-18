@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="widget_surface">#FF121212</color>
+    <color name="widget_surface_variant">#FF1E1F24</color>
+    <color name="widget_on_surface">#FFECEFF4</color>
+    <color name="widget_on_surface_secondary">#FFB9C0CC</color>
+    <color name="widget_divider">#1FECEFF4</color>
+
+    <color name="widget_course_tone_1">#FF2B3550</color>
+    <color name="widget_course_tone_2">#FF223C33</color>
+    <color name="widget_course_tone_3">#FF4A3926</color>
+    <color name="widget_course_tone_4">#FF3B2B4A</color>
+    <color name="widget_course_tone_5">#FF23424A</color>
+    <color name="widget_course_tone_6">#FF4A2B2B</color>
+</resources>

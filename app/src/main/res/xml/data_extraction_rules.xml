@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- 排除加密凭据和 Cookie 文件，避免备份恢复到新设备后 Keystore 密钥不匹配 -->
+        <exclude domain="sharedpref" path="xjtu_credentials.xml"/>
+        <exclude domain="sharedpref" path="xjtu_credentials_fallback.xml"/>
+        <exclude domain="sharedpref" path="xjtu_cookies.xml"/>
+        <exclude domain="sharedpref" path="xjtu_vpn_cookies.xml"/>
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="xjtu_credentials.xml"/>
+        <exclude domain="sharedpref" path="xjtu_credentials_fallback.xml"/>
+    </device-transfer>
+</data-extraction-rules>
